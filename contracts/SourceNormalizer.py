@@ -2,9 +2,9 @@
 
 import json
 import re
+
 from genlayer import *
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 
 @allow_storage
@@ -17,51 +17,41 @@ class NormalizedSource:
     trust_score: u256
     is_whitelisted: bool
     status: str
+    suggestion: str
 
 
 class SourceNormalizer(gl.Contract):
     sources: TreeMap[u256, NormalizedSource]
     next_id: u256
-    trusted_domains: List[str]
-    blocked_domains: List[str]
-    stats: Dict
 
     def __init__(self):
         self.next_id = u256(0)
-        self.trusted_domains = [
-            "court.gov", "justice.gov", "archive.org",
-            "blockchain.com", "etherscan.io", "ipfs.io", "arweave.net"
-        ]
-        self.blocked_domains = [
-            "localhost", "127.0.0.1", "example.com", "pastebin.com", "tinyurl.com"
-        ]
-        self.stats = {
-            "total_normalized": 0,
-            "total_rejected": 0,
-            "trusted_count": 0
-        }
 
-    # ================= MAIN FUNCTION =================
+    # ================= NORMALIZE =================
 
     @gl.public.write
     def normalize_source(self, raw_url: str) -> u256:
-        """Normalize and validate a source URL."""
         assert raw_url.strip() != "", "URL cannot be empty"
 
         # Clean and validate
-        cleaned = self._clean_url(raw_url)
-        assert cleaned is not None, "Invalid URL format"
+        cleaned, suggestion = self._clean_url_with_suggestion(raw_url)
+        assert cleaned is not None, suggestion
 
         domain = self._extract_domain(cleaned)
         assert domain is not None, "Could not extract domain"
 
-        assert domain not in self.blocked_domains, f"Domain '{domain}' is blocked"
+        # Check blocked domains
+        blocked_domains = ["localhost", "127.0.0.1", "example.com", "pastebin.com"]
+        if domain in blocked_domains:
+            suggestion = f"Domain '{domain}' is blocked. Please use an official source."
+            raise gl.vm.UserError(suggestion)
 
         # Calculate trust score
-        trust_score = self._calculate_trust(domain, cleaned)
-        is_whitelisted = domain in self.trusted_domains
+        trusted_domains = ["court.gov", "justice.gov", "archive.org", "blockchain.com", "etherscan.io", "ipfs.io"]
+        trust_score = self._calculate_trust(domain, cleaned, trusted_domains)
+        is_whitelisted = domain in trusted_domains
 
-        # Store in contract state
+        # Store
         eid = self.next_id
         self.next_id += u256(1)
 
@@ -72,13 +62,9 @@ class SourceNormalizer(gl.Contract):
             domain=domain,
             trust_score=u256(trust_score),
             is_whitelisted=is_whitelisted,
-            status="NORMALIZED"
+            status="NORMALIZED",
+            suggestion="",
         )
-
-        # Update stats
-        self.stats["total_normalized"] += 1
-        if is_whitelisted:
-            self.stats["trusted_count"] += 1
 
         return eid
 
@@ -86,15 +72,13 @@ class SourceNormalizer(gl.Contract):
 
     @gl.public.view
     def get_source_status(self, evidence_id: u256) -> str:
-        """Get status of a normalized source."""
         if evidence_id not in self.sources:
             return "NOT_FOUND"
         src = self.sources[evidence_id]
-        return f"{src.status}:{src.domain}:{int(src.trust_score)}"
+        return src.status + ":" + src.domain + ":" + str(int(src.trust_score))
 
     @gl.public.view
     def get_source_details(self, evidence_id: u256) -> str:
-        """Get full details of a normalized source."""
         if evidence_id not in self.sources:
             return "NOT_FOUND"
         src = self.sources[evidence_id]
@@ -105,63 +89,43 @@ class SourceNormalizer(gl.Contract):
             "domain": src.domain,
             "trust_score": int(src.trust_score),
             "is_whitelisted": src.is_whitelisted,
-            "status": src.status
+            "status": src.status,
         })
 
     @gl.public.view
-    def get_statistics(self) -> str:
-        """Get contract statistics."""
-        return json.dumps(self.stats)
-
-    @gl.public.view
     def list_sources(self) -> str:
-        """List all source IDs."""
         items = []
         for key in self.sources:
             src = self.sources[key]
-            items.append(f"{int(src.evidence_id)}:{src.status}")
+            items.append(str(int(src.evidence_id)) + ":" + src.status)
         return ",".join(items)
 
-    @gl.public.view
-    def get_sources_by_domain(self, domain: str) -> str:
-        """List source IDs by domain."""
-        items = []
-        for key in self.sources:
-            src = self.sources[key]
-            if src.domain == domain:
-                items.append(str(int(src.evidence_id)))
-        return ",".join(items)
+    # ================= HELPER METHODS WITH SUGGESTION =================
 
-    # ================= ADMIN FUNCTIONS =================
-
-    @gl.public.write
-    def add_trusted_domain(self, domain: str):
-        """Add a domain to whitelist (admin only)."""
-        assert domain.strip() != "", "Domain cannot be empty"
-        if domain not in self.trusted_domains:
-            self.trusted_domains.append(domain)
-        return True
-
-    @gl.public.write
-    def remove_trusted_domain(self, domain: str):
-        """Remove a domain from whitelist (admin only)."""
-        if domain in self.trusted_domains:
-            self.trusted_domains.remove(domain)
-        return True
-
-    # ================= HELPER METHODS =================
-
-    def _clean_url(self, url: str) -> Optional[str]:
-        """Clean and normalize URL."""
+    def _clean_url_with_suggestion(self, url: str):
         if not url:
-            return None
+            return None, "URL is empty"
+
         cleaned = url.strip().rstrip('/')
+
+        # Check for common typos in protocol
+        if cleaned.startswith('http//'):
+            suggestion = "Did you mean 'https://'?"
+            return None, suggestion
+        if cleaned.startswith('htp://'):
+            suggestion = "Did you mean 'https://'?"
+            return None, suggestion
+
+        # Upgrade HTTP to HTTPS
         if cleaned.startswith('http://'):
             cleaned = cleaned.replace('http://', 'https://', 1)
-        return cleaned if cleaned else None
 
-    def _extract_domain(self, url: str) -> Optional[str]:
-        """Extract domain from URL."""
+        # Remove trailing slash and spaces
+        cleaned = cleaned.strip()
+
+        return cleaned if cleaned else None, ""
+
+    def _extract_domain(self, url: str):
         try:
             without_protocol = re.sub(r'^https?://', '', url)
             domain = without_protocol.split('/')[0]
@@ -170,10 +134,9 @@ class SourceNormalizer(gl.Contract):
         except:
             return None
 
-    def _calculate_trust(self, domain: str, url: str) -> int:
-        """Calculate trust score (0-100)."""
+    def _calculate_trust(self, domain: str, url: str, trusted_domains: list) -> int:
         score = 0
-        if domain in self.trusted_domains:
+        if domain in trusted_domains:
             score += 50
         if url.startswith('https://'):
             score += 15
