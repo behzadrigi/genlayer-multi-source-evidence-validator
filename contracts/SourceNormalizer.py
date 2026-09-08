@@ -7,14 +7,19 @@ from genlayer import *
 from dataclasses import dataclass
 
 
-BLOCKED_DOMAINS = {"localhost", "127.0.0.1", "example.com", "pastebin.com"}
-WHITELISTED_DOMAINS = {
-    "court.gov", "justice.gov", "archive.org",
-    "blockchain.com", "etherscan.io", "ipfs.io",
-}
+# ================= HELPER FUNCTIONS (MODULE-LEVEL) =================
+
+def _is_valid_url(url: str) -> bool:
+    """Validate URL format with protocol, domain, and optional path."""
+    pattern = re.compile(
+        r'^(https?://)'                     # protocol (http or https)
+        r'([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}'   # domain (at least two parts)
+        r'(/[\w\-./?%&=]*)?$'               # optional path, query, or fragments
+    )
+    return bool(pattern.match(url.strip()))
 
 
-def clean_url(url: str):
+def _clean_url(url: str):
     if not url:
         return None
     cleaned = url.strip().rstrip('/')
@@ -24,7 +29,7 @@ def clean_url(url: str):
     return cleaned if cleaned else None
 
 
-def extract_domain(url: str):
+def _extract_domain(url: str):
     try:
         without_protocol = re.sub(r'^https?://', '', url)
         domain = without_protocol.split('/')[0]
@@ -34,7 +39,7 @@ def extract_domain(url: str):
         return None
 
 
-def calculate_trust(domain: str, url: str, is_whitelisted: bool) -> int:
+def _calculate_trust(domain: str, url: str, is_whitelisted: bool) -> int:
     score = 0
     if is_whitelisted:
         score += 50
@@ -44,6 +49,8 @@ def calculate_trust(domain: str, url: str, is_whitelisted: bool) -> int:
         score += 10
     return min(100, max(0, score))
 
+
+# ================= CONTRACT =================
 
 @allow_storage
 @dataclass
@@ -68,18 +75,30 @@ class SourceNormalizer(gl.Contract):
     def normalize_source(self, raw_url: str) -> u256:
         assert raw_url.strip() != "", "URL cannot be empty"
 
-        cleaned = clean_url(raw_url)
+        # STEP 1: Validate URL format FIRST
+        assert _is_valid_url(raw_url), "Invalid URL format"
+
+        # STEP 2: Clean and normalize
+        cleaned = _clean_url(raw_url)
         assert cleaned is not None, "Invalid URL format"
 
-        domain = extract_domain(cleaned)
+        # STEP 3: Extract domain
+        domain = _extract_domain(cleaned)
         assert domain is not None, "Could not extract domain"
 
-        assert domain not in BLOCKED_DOMAINS, "Domain is blocked"
+        # STEP 4: Check against blocked domains
+        blocked_domains = {"localhost", "127.0.0.1", "example.com", "pastebin.com"}
+        assert domain not in blocked_domains, "Domain is blocked"
 
-        is_whitelisted = domain in WHITELISTED_DOMAINS
+        # STEP 5: Check whitelist and calculate trust
+        whitelisted_domains = {
+            "court.gov", "justice.gov", "archive.org",
+            "blockchain.com", "etherscan.io", "ipfs.io",
+        }
+        is_whitelisted = domain in whitelisted_domains
+        trust_score = _calculate_trust(domain, cleaned, is_whitelisted)
 
-        trust_score = calculate_trust(domain, cleaned, is_whitelisted)
-
+        # STEP 6: Store and return
         eid = self.next_id
         self.next_id += u256(1)
 
