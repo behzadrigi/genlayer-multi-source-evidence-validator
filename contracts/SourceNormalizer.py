@@ -7,6 +7,44 @@ from genlayer import *
 from dataclasses import dataclass
 
 
+BLOCKED_DOMAINS = {"localhost", "127.0.0.1", "example.com", "pastebin.com"}
+WHITELISTED_DOMAINS = {
+    "court.gov", "justice.gov", "archive.org",
+    "blockchain.com", "etherscan.io", "ipfs.io",
+}
+
+
+def clean_url(url: str):
+    if not url:
+        return None
+    cleaned = url.strip().rstrip('/')
+    if cleaned.startswith('http://'):
+        cleaned = cleaned.replace('http://', 'https://', 1)
+    cleaned = cleaned.replace(' ', '')
+    return cleaned if cleaned else None
+
+
+def extract_domain(url: str):
+    try:
+        without_protocol = re.sub(r'^https?://', '', url)
+        domain = without_protocol.split('/')[0]
+        domain = re.sub(r'^www\.', '', domain)
+        return domain if domain else None
+    except Exception:
+        return None
+
+
+def calculate_trust(domain: str, url: str, is_whitelisted: bool) -> int:
+    score = 0
+    if is_whitelisted:
+        score += 50
+    if url.startswith('https://'):
+        score += 15
+    if 'utm_' not in url and 'ref=' not in url and 'source=' not in url:
+        score += 10
+    return min(100, max(0, score))
+
+
 @allow_storage
 @dataclass
 class NormalizedSource:
@@ -30,24 +68,17 @@ class SourceNormalizer(gl.Contract):
     def normalize_source(self, raw_url: str) -> u256:
         assert raw_url.strip() != "", "URL cannot be empty"
 
-        cleaned = self._clean_url(raw_url)
+        cleaned = clean_url(raw_url)
         assert cleaned is not None, "Invalid URL format"
 
-        domain = self._extract_domain(cleaned)
+        domain = extract_domain(cleaned)
         assert domain is not None, "Could not extract domain"
 
-        # Blocked domains (hardcoded, no List)
-        assert domain != "localhost", "Domain is blocked"
-        assert domain != "127.0.0.1", "Domain is blocked"
-        assert domain != "example.com", "Domain is blocked"
-        assert domain != "pastebin.com", "Domain is blocked"
+        assert domain not in BLOCKED_DOMAINS, "Domain is blocked"
 
-        # Whitelist check (hardcoded, no List)
-        is_whitelisted = False
-        if domain == "court.gov" or domain == "justice.gov" or domain == "archive.org" or domain == "blockchain.com" or domain == "etherscan.io" or domain == "ipfs.io":
-            is_whitelisted = True
+        is_whitelisted = domain in WHITELISTED_DOMAINS
 
-        trust_score = self._calculate_trust(domain, cleaned, is_whitelisted)
+        trust_score = calculate_trust(domain, cleaned, is_whitelisted)
 
         eid = self.next_id
         self.next_id += u256(1)
@@ -93,31 +124,3 @@ class SourceNormalizer(gl.Contract):
             src = self.sources[key]
             items.append(str(int(src.evidence_id)) + ":" + src.status)
         return ",".join(items)
-
-    def _clean_url(self, url: str):
-        if not url:
-            return None
-        cleaned = url.strip().rstrip('/')
-        if cleaned.startswith('http://'):
-            cleaned = cleaned.replace('http://', 'https://', 1)
-        cleaned = cleaned.replace(' ', '')
-        return cleaned if cleaned else None
-
-    def _extract_domain(self, url: str):
-        try:
-            without_protocol = re.sub(r'^https?://', '', url)
-            domain = without_protocol.split('/')[0]
-            domain = re.sub(r'^www\.', '', domain)
-            return domain if domain else None
-        except:
-            return None
-
-    def _calculate_trust(self, domain: str, url: str, is_whitelisted: bool) -> int:
-        score = 0
-        if is_whitelisted:
-            score += 50
-        if url.startswith('https://'):
-            score += 15
-        if 'utm_' not in url and 'ref=' not in url and 'source=' not in url:
-            score += 10
-        return min(100, max(0, score))
