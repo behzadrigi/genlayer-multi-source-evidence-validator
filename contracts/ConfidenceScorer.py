@@ -11,6 +11,7 @@ from dataclasses import dataclass
 class ConfidenceRecord:
     evidence_id: u256
     verification_id: u256
+    agent: str  # NEW: agent read from verification on-chain
     trust_score: u256
     source_count: u256
     final_score: u256
@@ -29,9 +30,6 @@ class ConfidenceScorer(gl.Contract):
 
     @gl.public.write
     def calculate_score(self, verification_id: u256) -> u256:
-        """Calculates score by reading verification data from MultiSourceVerifier on-chain."""
-        
-        # Read verification data from upstream contract
         verifier_data_raw = gl.get_contract_at(
             Address(self.verifier_contract)
         ).view().get_verification_data(verification_id)
@@ -46,8 +44,10 @@ class ConfidenceScorer(gl.Contract):
         verified_count = data.get("verified_count", 0)
         total_sources = data.get("total_sources", 1)
         status = data.get("status", "PENDING")
+        agent = data.get("agent", "")  # NEW: read agent from verification
 
-        # Calculate trust score
+        assert agent != "", "Agent not found in verification record"
+
         base_score = (verified_count / total_sources) * 100
 
         if status == "VERIFIED":
@@ -66,6 +66,7 @@ class ConfidenceScorer(gl.Contract):
         self.scores[eid] = ConfidenceRecord(
             evidence_id=eid,
             verification_id=u256(verification_id),
+            agent=agent,  # NEW: stored from on-chain verification
             trust_score=u256(final_score),
             source_count=u256(total_sources),
             final_score=u256(final_score),
@@ -90,6 +91,7 @@ class ConfidenceScorer(gl.Contract):
         return json.dumps({
             "id": int(sc.evidence_id),
             "verification_id": int(sc.verification_id),
+            "agent": sc.agent,
             "trust_score": int(sc.trust_score),
             "source_count": int(sc.source_count),
             "final_score": int(sc.final_score),
@@ -99,13 +101,13 @@ class ConfidenceScorer(gl.Contract):
 
     @gl.public.view
     def get_score_data(self, evidence_id: u256) -> str:
-        """Returns raw score data for downstream contracts."""
         if evidence_id not in self.scores:
             return "NOT_FOUND"
         sc = self.scores[evidence_id]
         return json.dumps({
             "id": int(sc.evidence_id),
             "verification_id": int(sc.verification_id),
+            "agent": sc.agent,  # NEW: returned for downstream
             "trust_score": int(sc.trust_score),
             "source_count": int(sc.source_count),
             "final_score": int(sc.final_score),
