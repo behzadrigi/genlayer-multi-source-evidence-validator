@@ -29,11 +29,10 @@ class ReputationGuardian(gl.Contract):
         self.scorer_contract = scorer_address
 
     @gl.public.write
-    def apply_reputation_change(self, agent: str, score_id: u256) -> u256:
-        """Applies reputation change by reading score data from ConfidenceScorer on-chain."""
-        assert agent.strip() != "", "Agent cannot be empty"
+    def apply_reputation_change(self, score_id: u256) -> u256:
+        """Applies reputation change by reading score data from ConfidenceScorer on-chain.
+        Agent is read from the on-chain score record, NOT from caller input."""
 
-        # Read score data from upstream contract
         scorer_data_raw = gl.get_contract_at(
             Address(self.scorer_contract)
         ).view().get_score_data(score_id)
@@ -45,11 +44,13 @@ class ReputationGuardian(gl.Contract):
         except:
             raise gl.vm.UserError("Invalid data from scorer contract")
 
+        # Read agent AND score from the authenticated on-chain record
+        agent = data.get("agent", "")
         final_score = data.get("final_score", 0)
         status = data.get("status", "REJECTED")
 
-        if status != "APPROVED":
-            raise gl.vm.UserError("Score not approved")
+        assert agent != "", "Agent not found in score record"
+        assert status == "APPROVED", "Score not approved"
 
         current_reputation = self.reputation.get(agent, u256(50))
         new_score = u256(final_score)
