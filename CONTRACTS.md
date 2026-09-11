@@ -1,107 +1,225 @@
-# Contracts
+# Contracts Documentation
+
+This document describes the four intelligent contracts in the GenLayer Multi-Source Evidence Validator Suite.
+
+## Contract Overview
+
+| Contract | Purpose | Consensus Pattern |
+| :--- | :--- | :--- |
+| SourceNormalizer | Normalizes and validates evidence source URLs | Deterministic (no LLM) |
+| MultiSourceVerifier | Verifies evidence from multiple sources using real consensus | Custom leader/validator with gl.nondet.web.render and gl.vm.run_nondet_unsafe |
+| ConfidenceScorer | Calculates confidence score, reads on-chain from MultiSourceVerifier | Deterministic (no LLM) |
+| ReputationGuardian | Manages reputation changes, reads on-chain from ConfidenceScorer | Deterministic (no LLM) |
+
+---
 
 ## 1. SourceNormalizer
 
-**Pattern:** fully deterministic — no LLM, no consensus needed.
+### Purpose
+Normalizes and validates evidence source URLs before they are used in verification.
 
-**Purpose:** the entry gate for every source URL. Cleans and normalizes a raw URL,
-extracts its domain, rejects blocked domains, checks whitelist membership, and
-computes a 0-100 trust score.
+### State Variables
+- `sources: TreeMap[u256, NormalizedSource]` - stores normalized sources
+- `next_id: u256` - counter for source IDs
 
-**Public methods**
-- `normalize_source(raw_url: str) -> u256` — normalizes, validates, and stores a
-  source; returns its `evidence_id`.
-- `get_source_status(evidence_id) -> str`
-- `get_source_details(evidence_id) -> str` (JSON)
+### Storage Structure
+```python
+@allow_storage
+@dataclass
+class NormalizedSource:
+    evidence_id: u256
+    original_url: str
+    normalized_url: str
+    domain: str
+    trust_score: u256
+    is_whitelisted: bool
+    status: str
+```
+
+### Write Methods
+- `normalize_source(raw_url: str) -> u256` - normalizes URL, checks whitelist/blacklist, returns evidence_id
+
+### Read Methods
+- `get_source_status(evidence_id: u256) -> str`
+- `get_source_details(evidence_id: u256) -> str`
 - `list_sources() -> str`
 
-**Safety properties**
-- A blocked domain (`localhost`, `127.0.0.1`, `example.com`, `pastebin.com`) can never
-  be normalized — `normalize_source` reverts.
-- An unparseable URL can never be stored — `normalize_source` reverts.
-- Trust score is bounded to `[0, 100]` by construction.
+### Rules
+- Converts HTTP to HTTPS
+- Removes spaces and trailing slashes
+- Blocks localhost, 127.0.0.1, example.com, pastebin.com
+- Whitelist: court.gov, justice.gov, archive.org, blockchain.com, etherscan.io, ipfs.io
+- Trust score: whitelist (+50), HTTPS (+15), no tracking params (+10)
 
 ---
 
 ## 2. MultiSourceVerifier
 
-**Pattern:** non-deterministic, Equivalence-Principle consensus (`gl.vm.run_nondet_unsafe`
-with a `leader_fn`/`validator_fn` pair), web-grounded.
+### Purpose
+Fetches and verifies evidence from multiple independent sources using real web content and consensus.
 
-**Purpose:** the core of the suite. Takes a claim plus at least two source URLs,
-fetches every URL live via `gl.nondet.web.render`, and asks the model whether each
-page's content corroborates the claim. The result (`status`, `verified_count`) is only
-written to state once independent validators, each re-running the same fetch-and-judge
-routine, agree on both fields.
+### State Variables
+- `verifications: TreeMap[u256, VerificationRecord]` - stores verification records
+- `next_id: u256` - counter for verification IDs
 
-**Public methods**
-- `submit_evidence(agent, claim, sources) -> u256` — requires ≥2 comma-separated,
-  URL-format-valid sources; returns `evidence_id`.
-- `verify_sources(evidence_id) -> bool` — runs the consensus check; can only be called
-  once per evidence item (`status` must still be `PENDING`).
-- `get_verification_status(evidence_id) -> str`
-- `get_verification_details(evidence_id) -> str` (JSON)
+### Storage Structure
+```python
+@allow_storage
+@dataclass
+class VerificationRecord:
+    evidence_id: u256
+    agent: str
+    claim: str
+    sources: str
+    verified_count: u256
+    total_sources: u256
+    status: str
+    verified_urls: str
+```
+
+### Write Methods
+- `submit_evidence(agent: str, claim: str, sources: str) -> u256` - registers a new evidence claim
+- `verify_sources(evidence_id: u256) -> bool` - runs consensus verification using gl.nondet.web.render
+
+### Read Methods
+- `get_verification_status(evidence_id: u256) -> str`
+- `get_verification_details(evidence_id: u256) -> str`
+- `get_verification_data(evidence_id: u256) -> str` - NEW: raw data for downstream contracts
 - `list_verifications() -> str`
-- `get_agent_verifications(agent) -> str`
+- `get_agent_verifications(agent: str) -> str`
 
-**Safety properties**
-- `verify_sources` cannot be called twice on the same evidence item.
-- The verification result is never taken from caller input — every validator
-  independently re-fetches every source and re-runs the judgment; a validator that
-  gets a different `status` or `verified_count` rejects the leader's result.
-- `status` is always one of `VERIFIED` (all sources corroborate), `PARTIAL` (≥50%
-  corroborate), or `REJECTED` (<50%).
-- A source that fails to fetch is treated as not-corroborated rather than causing the
-  whole transaction to fail.
+### Consensus Pattern
+- Uses gl.nondet.web.render to fetch each source URL
+- Uses LLM to check if content corroborates the claim
+- Uses gl.vm.run_nondet_unsafe for leader/validator consensus
+- Status: VERIFIED (all sources), PARTIAL (at least half), REJECTED (less than half)
+
+### Rules
+- At least 2 sources required
+- All sources must be valid URLs
+- If fetch fails, source is treated as not corroborated (no error)
 
 ---
 
 ## 3. ConfidenceScorer
 
-**Pattern:** fully deterministic.
+### Purpose
+Calculates a final confidence score based on verification results, read on-chain from MultiSourceVerifier.
 
-**Purpose:** converts a `MultiSourceVerifier` result into a single 0-100 confidence
-number and an `APPROVED`/`REJECTED` decision, so downstream contracts (and users) get
-one comparable figure instead of a raw status string.
+### Constructor
+```python
+def __init__(self, verifier_address: str):
+    self.next_id = u256(0)
+    self.verifier_contract = verifier_address
+```
 
-**Formula:** `final_score = (verified_count / total_sources * 100) * status_multiplier`,
-where `status_multiplier` is `1.0` for `VERIFIED`, `0.7` for `PARTIAL`, `0.3` for
-anything else. `APPROVED` requires `final_score >= 50`.
+### State Variables
+- `scores: TreeMap[u256, ConfidenceRecord]` - stores confidence records
+- `next_id: u256` - counter for score IDs
+- `verifier_contract: str` - address of MultiSourceVerifier contract
 
-**Public methods**
-- `calculate_score(verification_id, verification_details) -> u256`
-- `get_score(evidence_id) -> str`
-- `get_score_details(evidence_id) -> str` (JSON)
+### Storage Structure
+```python
+@allow_storage
+@dataclass
+class ConfidenceRecord:
+    evidence_id: u256
+    verification_id: u256
+    trust_score: u256
+    source_count: u256
+    final_score: u256
+    status: str
+    verifier_address: str
+```
+
+### Write Methods
+- `calculate_score(verification_id: u256) -> u256` - reads from MultiSourceVerifier on-chain, returns score_id
+
+### Read Methods
+- `get_score(evidence_id: u256) -> str`
+- `get_score_details(evidence_id: u256) -> str`
+- `get_score_data(evidence_id: u256) -> str` - NEW: raw data for downstream contracts
 - `list_scores() -> str`
 
-**Safety properties**
-- `final_score` is always clamped to `[0, 100]`.
-- `status` is a pure function of `final_score`, so it can't diverge from the number
-  shown alongside it.
+### Scoring Formula
+```
+base_score = (verified_count / total_sources) * 100
+multiplier = VERIFIED: 1.0, PARTIAL: 0.7, REJECTED: 0.3
+final_score = int(base_score * multiplier)
+status = APPROVED if final_score >= 50 else REJECTED
+```
+
+### Security
+- Does NOT trust caller-supplied JSON
+- Reads verification data directly from MultiSourceVerifier on-chain using gl.get_contract_at()
 
 ---
 
 ## 4. ReputationGuardian
 
-**Pattern:** fully deterministic — deliberately no LLM/consensus, since applying an
-already-approved numeric score to a reputation ledger is bookkeeping, not judgment.
+### Purpose
+Manages reputation changes based on approved confidence scores, read on-chain from ConfidenceScorer.
 
-**Purpose:** applies an `INCREASE`/`DECREASE` to an agent's on-chain reputation once
-(and only once) a `ConfidenceScorer` result is `APPROVED`.
+### Constructor
+```python
+def __init__(self, scorer_address: str):
+    self.next_id = u256(0)
+    self.scorer_contract = scorer_address
+```
 
-**Public methods**
-- `initialize_reputation(agent, initial_score)`
-- `apply_reputation_change(agent, score_id, score_details) -> u256`
-- `get_reputation(agent) -> str`
-- `get_change_status(change_id) -> str`
-- `get_change_details(change_id) -> str` (JSON)
+### State Variables
+- `changes: TreeMap[u256, ReputationChange]` - stores reputation changes
+- `next_id: u256` - counter for change IDs
+- `reputation: TreeMap[str, u256]` - agent reputation scores
+- `scorer_contract: str` - address of ConfidenceScorer contract
+
+### Storage Structure
+```python
+@allow_storage
+@dataclass
+class ReputationChange:
+    change_id: u256
+    agent: str
+    score_id: u256
+    final_score: u256
+    change_type: str
+    status: str
+    scorer_address: str
+```
+
+### Write Methods
+- `apply_reputation_change(agent: str, score_id: u256) -> u256` - reads from ConfidenceScorer on-chain, returns change_id
+- `initialize_reputation(agent: str, initial_score: u256)` - sets initial reputation
+
+### Read Methods
+- `get_reputation(agent: str) -> str`
+- `get_change_status(change_id: u256) -> str`
+- `get_change_details(change_id: u256) -> str`
 - `list_changes() -> str`
-- `get_agent_changes(agent) -> str`
+- `get_agent_changes(agent: str) -> str`
 
-**Safety properties**
-- `apply_reputation_change` reverts outright ("Score not approved") unless
-  `score_details.status == "APPROVED"` — a `REJECTED` score can never move
-  reputation, confirmed by tests T3/T5 in the test reports.
-- A change smaller than 10 points is classified `NEUTRAL` and is rejected rather than
-  silently applied, so trivial fluctuations never get recorded as a reputation event.
-- New agents default to a reputation of 50 the first time they're read or changed.
+### Change Rules
+- Only applies if score status is APPROVED
+- INCREASE: new score >= current + 10
+- DECREASE: new score <= current - 10
+- NEUTRAL: change too small, rejected
+
+### Security
+- Does NOT trust caller-supplied JSON
+- Reads score data directly from ConfidenceScorer on-chain using gl.get_contract_at()
+
+---
+
+## Contract Chaining
+
+The v2 architecture uses on-chain chaining:
+
+```
+SourceNormalizer → MultiSourceVerifier → ConfidenceScorer → ReputationGuardian
+```
+
+- ConfidenceScorer holds MultiSourceVerifier address
+- ReputationGuardian holds ConfidenceScorer address
+- Each downstream contract reads from upstream using gl.get_contract_at(Address(...)).view().get_..._data()
+
+This prevents fabrication of approved scores and ensures every reputation change is backed by a verified evidence record.
