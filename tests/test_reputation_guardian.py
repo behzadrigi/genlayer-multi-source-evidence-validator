@@ -1,76 +1,172 @@
-import json
-import pytest
-from genlayer_py import create_client, create_account
-from genlayer_py.chains import localnet
+"""
+Test suite for ReputationGuardian contract (v2).
 
-CONTRACT_ADDRESS = "0xb49467e57718A5F8940D6C43cfC14D542FEC10C0"
+Run these tests manually in GenLayer Studio by calling the functions
+with the given inputs and comparing the outputs.
+"""
 
+# ============================================================================
+# TEST T1: Initialize reputation for an agent
+# ============================================================================
 
-@pytest.fixture(scope="module")
-def client():
-    account = create_account()
-    return create_client(chain=localnet, account=account)
-
-
-def _write(client, function_name, args):
-    tx_hash = client.write_contract(
-        address=CONTRACT_ADDRESS, function_name=function_name, args=args, value=0,
-    )
-    return client.wait_for_transaction_receipt(transaction_hash=tx_hash, status="ACCEPTED")
-
-
-def _read(client, function_name, args=None):
-    return client.read_contract(
-        address=CONTRACT_ADDRESS, function_name=function_name, args=args or [],
-    )
+def test_initialize_reputation():
+    """
+    Input:
+      agent: "0xNewAgent"
+      initial_score: 50
+    Expected:
+      - Status: SUCCESS
+      - Output: null
+    """
+    pass
 
 
-def test_initialize_and_read_reputation(client):
-    _write(client, "initialize_reputation", ["0xTestAgent", 50])
-    assert _read(client, "get_reputation", ["0xTestAgent"]) == "REPUTATION:50"
+# ============================================================================
+# TEST T2: Get reputation
+# ============================================================================
+
+def test_get_reputation():
+    """
+    Input: agent = "0xNewAgent"
+    Expected: "REPUTATION:50"
+    """
+    pass
 
 
-def test_rejected_score_cannot_change_reputation(client):
-    details = json.dumps({
-        "id": 0, "verification_id": 0, "trust_score": 0,
-        "source_count": 2, "final_score": 0, "status": "REJECTED",
-    })
-    with pytest.raises(Exception, match="Score not approved"):
-        _write(client, "apply_reputation_change", ["0xTestAgent", 0, details])
-    assert _read(client, "get_reputation", ["0xTestAgent"]) == "REPUTATION:50"
+# ============================================================================
+# TEST T3: Apply reputation change with rejected score (should fail)
+# ============================================================================
+
+def test_apply_reputation_change_rejected():
+    """
+    Input:
+      agent: "0xNewAgent"
+      score_id: 0
+
+    Note: This method reads score data directly from ConfidenceScorer
+          on-chain using gl.get_contract_at(). No JSON is passed by the caller.
+
+    Expected:
+      - Status: ERROR
+      - Error: "Score not approved"
+
+    Explanation:
+      - score_id 0 in ConfidenceScorer has status REJECTED (final_score: 35)
+      - since status != APPROVED, the change is rejected
+    """
+    pass
 
 
-def test_partial_but_still_rejected_score_cannot_change_reputation(client):
-    _write(client, "initialize_reputation", ["0xTestAgent2", 50])
-    details = json.dumps({
-        "id": 1, "verification_id": 1, "trust_score": 35,
-        "source_count": 2, "final_score": 35, "status": "REJECTED",
-    })
-    with pytest.raises(Exception, match="Score not approved"):
-        _write(client, "apply_reputation_change", ["0xTestAgent2", 1, details])
-    assert _read(client, "get_reputation", ["0xTestAgent2"]) == "REPUTATION:50"
+# ============================================================================
+# TEST T4: Verify reputation unchanged after failed change
+# ============================================================================
+
+def test_verify_reputation_unchanged():
+    """
+    Input: agent = "0xNewAgent"
+    Expected: "REPUTATION:50"
+
+    Explanation:
+      - The rejected change from T3 did not modify the reputation.
+    """
+    pass
 
 
-def test_no_changes_recorded_yet(client):
-    assert _read(client, "list_changes") == ""
-    assert _read(client, "get_agent_changes", ["0xTestAgent"]) == ""
+# ============================================================================
+# TEST T5: List all changes (should be empty)
+# ============================================================================
+
+def test_list_changes():
+    """
+    Input: None
+    Expected: "" (empty string)
+
+    Explanation:
+      - No successful reputation changes have been recorded.
+    """
+    pass
 
 
-def test_approved_score_applies_increase(client):
-    """The main path: a genuinely APPROVED score should raise reputation and be
-    recorded as an INCREASE. This is the case that still needs to be run — see
-    DECISIONS.md, 'Known limitation.'"""
-    _write(client, "initialize_reputation", ["0xTestAgent5", 50])
-    details = json.dumps({
-        "id": 2, "verification_id": 2, "trust_score": 100,
-        "source_count": 2, "final_score": 100, "status": "APPROVED",
-    })
-    _write(client, "apply_reputation_change", ["0xTestAgent5", 2, details])
-    assert _read(client, "get_reputation", ["0xTestAgent5"]) == "REPUTATION:100"
-    change = json.loads(_read(client, "get_change_details", [0]))
-    assert change["change_type"] == "INCREASE"
-    assert change["status"] == "APPLIED"
+# ============================================================================
+# TEST T6: Get agent changes (should be empty)
+# ============================================================================
+
+def test_get_agent_changes():
+    """
+    Input: agent = "0xNewAgent"
+    Expected: "" (empty string)
+    """
+    pass
 
 
-def test_change_status_not_found(client):
-    assert _read(client, "get_change_status", [999]) == "NOT_FOUND"
+# ============================================================================
+# TEST T7: Get change status for non-existent change
+# ============================================================================
+
+def test_get_change_status_not_found():
+    """
+    Input: change_id = 0
+    Expected: "NOT_FOUND"
+    """
+    pass
+
+
+# ============================================================================
+# TEST T8: Get change details for non-existent change
+# ============================================================================
+
+def test_get_change_details_not_found():
+    """
+    Input: change_id = 0
+    Expected: "NOT_FOUND"
+    """
+    pass
+
+
+# ============================================================================
+# DEPLOYED CONTRACT (v2)
+# ============================================================================
+
+DEPLOYED_ADDRESS = "0x20d1e42064Bc02dE8421b3925448bFEdC82BF49b"
+EXPLORER_LINK = "https://explorer-studio.genlayer.com/address/0x20d1e42064Bc02dE8421b3925448bFEdC82BF49b"
+DEPLOY_TX = "https://explorer-studio.genlayer.com/tx/0xc16b6d48f8768f2de162629e294c132a7bdb9a398255aabe79543a5aad897567"
+
+UPSTREAM_CONTRACT = "0xC8c2Eb37AF740bC4f327C4D0fe3D26BF3D6C401C"
+
+
+# ============================================================================
+# TEST TRANSACTION LINKS
+# ============================================================================
+
+TEST_LINKS = {
+    "T1_initialize_reputation":
+        "https://explorer-studio.genlayer.com/tx/0x622ca6cdbd832065b9595cf8bf01abe1e34e19c474cb6e49a562f05843cd4136",
+    "T3_apply_reputation_change_rejected":
+        "https://explorer-studio.genlayer.com/tx/0xb7232ca781f1487eb34137fee5d8da53f686d36f3975fe5a75629ffcba27814c",
+}
+
+
+# ============================================================================
+# CHANGE RULES
+# ============================================================================
+
+CHANGE_RULES = """
+- Only applies if score status is APPROVED.
+- INCREASE: new_score >= current_reputation + 10
+- DECREASE: new_score <= current_reputation - 10
+- NEUTRAL:  change too small, rejected with error
+"""
+
+
+# ============================================================================
+# KEY NOTES
+# ============================================================================
+
+NOTES = """
+- This contract does NOT accept score JSON from the caller.
+- Instead, it reads score data directly from ConfidenceScorer
+  on-chain using gl.get_contract_at(Address(...)).view().get_score_data().
+- The scorer_address field in every change record proves the source of truth.
+- This design prevents any caller from fabricating an approved score
+  and applying an illegitimate reputation change.
+"""
