@@ -13,37 +13,44 @@ class ReputationChange:
     agent: str
     score_id: u256
     final_score: u256
-    change_type: str  # INCREASE, DECREASE, NEUTRAL
-    status: str  # PENDING, APPLIED, REJECTED
+    change_type: str
+    status: str
+    scorer_address: str
 
 
 class ReputationGuardian(gl.Contract):
     changes: TreeMap[u256, ReputationChange]
     next_id: u256
-    reputation: TreeMap[str, u256]  # agent -> reputation score
+    reputation: TreeMap[str, u256]
+    scorer_contract: str
 
-    def __init__(self):
+    def __init__(self, scorer_address: str):
         self.next_id = u256(0)
+        self.scorer_contract = scorer_address
 
     @gl.public.write
-    def apply_reputation_change(self, agent: str, score_id: u256, score_details: str) -> u256:
+    def apply_reputation_change(self, agent: str, score_id: u256) -> u256:
+        """Applies reputation change by reading score data from ConfidenceScorer on-chain."""
         assert agent.strip() != "", "Agent cannot be empty"
-        assert score_details.strip() != "", "Score details required"
 
-        # Parse score details
+        # Read score data from upstream contract
+        scorer_data_raw = gl.get_contract_at(
+            Address(self.scorer_contract)
+        ).view().get_score_data(score_id)
+
+        assert scorer_data_raw != "NOT_FOUND", "Score not found in upstream contract"
+
         try:
-            data = json.loads(score_details)
+            data = json.loads(scorer_data_raw)
         except:
-            raise gl.vm.UserError("Invalid JSON format")
+            raise gl.vm.UserError("Invalid data from scorer contract")
 
         final_score = data.get("final_score", 0)
         status = data.get("status", "REJECTED")
 
-        # Only apply if score is approved
         if status != "APPROVED":
             raise gl.vm.UserError("Score not approved")
 
-        # Determine change type
         current_reputation = self.reputation.get(agent, u256(50))
         new_score = u256(final_score)
 
@@ -54,14 +61,11 @@ class ReputationGuardian(gl.Contract):
         else:
             change_type = "NEUTRAL"
 
-        # Only apply significant changes
         if change_type == "NEUTRAL":
             raise gl.vm.UserError("Change too small to apply")
 
-        # Update reputation
         self.reputation[agent] = new_score
 
-        # Record the change
         cid = self.next_id
         self.next_id += u256(1)
 
@@ -72,6 +76,7 @@ class ReputationGuardian(gl.Contract):
             final_score=u256(final_score),
             change_type=change_type,
             status="APPLIED",
+            scorer_address=self.scorer_contract,
         )
 
         return cid
@@ -106,6 +111,7 @@ class ReputationGuardian(gl.Contract):
             "final_score": int(ch.final_score),
             "change_type": ch.change_type,
             "status": ch.status,
+            "scorer_address": ch.scorer_address,
         })
 
     @gl.public.view
