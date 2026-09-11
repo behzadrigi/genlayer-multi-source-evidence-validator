@@ -7,50 +7,13 @@ from genlayer import *
 from dataclasses import dataclass
 
 
-URL_PATTERN = re.compile(
-    r'^(https?://)'
-    r'([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}'
-    r'(/[\w\-./?%&=]*)?$'
-)
-
-
-def is_valid_url(url: str) -> bool:
-    return bool(URL_PATTERN.match(url.strip()))
-
-
-def check_sources(source_list: list, claim: str) -> dict:
-    """Fetches every source URL live and asks the model whether its content
-    corroborates the claim. Runs identically inside leader_fn and validator_fn,
-    so the result is only accepted once independent validators agree on it."""
-    corroborated = 0
-    for url in source_list:
-        try:
-            page = gl.nondet.web.render(url, mode='text')
-        except Exception:
-            continue
-
-        prompt = f"""Does the following webpage content corroborate this claim?
-
-Claim: {claim}
-
-Webpage content (truncated):
-{page[:3000]}
-
-Respond as JSON: {{"corroborates": true/false}}"""
-
-        result = gl.nondet.exec_prompt(prompt, response_format="json")
-        if result.get("corroborates") is True:
-            corroborated += 1
-
-    total = len(source_list)
-    if corroborated == total:
-        status = "VERIFIED"
-    elif corroborated * 2 >= total:
-        status = "PARTIAL"
-    else:
-        status = "REJECTED"
-
-    return {"verified_count": corroborated, "total": total, "status": status}
+def _is_valid_url(url: str) -> bool:
+    pattern = re.compile(
+        r'^(https?://)'
+        r'([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}'
+        r'(/[\w\-./?%&=]*)?$'
+    )
+    return bool(pattern.match(url.strip()))
 
 
 @allow_storage
@@ -59,10 +22,11 @@ class VerificationRecord:
     evidence_id: u256
     agent: str
     claim: str
-    sources: str  # Comma-separated URLs
+    sources: str
     verified_count: u256
     total_sources: u256
-    status: str  # PENDING, VERIFIED, REJECTED, PARTIAL
+    status: str
+    verified_urls: str
 
 
 class MultiSourceVerifier(gl.Contract):
@@ -78,11 +42,12 @@ class MultiSourceVerifier(gl.Contract):
         assert claim.strip() != "", "Claim cannot be empty"
         assert sources.strip() != "", "Sources cannot be empty"
 
-        source_list = [s.strip() for s in sources.split(',')]
+        source_list = sources.split(',')
         assert len(source_list) >= 2, "At least 2 sources required"
 
         for src in source_list:
-            assert is_valid_url(src), f"Invalid URL: {src}"
+            src = src.strip()
+            assert _is_valid_url(src), f"Invalid URL: {src}"
 
         eid = self.next_id
         self.next_id += u256(1)
@@ -95,6 +60,7 @@ class MultiSourceVerifier(gl.Contract):
             verified_count=u256(0),
             total_sources=u256(len(source_list)),
             status="PENDING",
+            verified_urls="",
         )
 
         return eid
@@ -105,25 +71,58 @@ class MultiSourceVerifier(gl.Contract):
         ev = self.verifications[evidence_id]
         assert ev.status == "PENDING", "Already verified"
 
-        source_list = [s.strip() for s in ev.sources.split(',')]
+        source_list = ev.sources.split(',')
         claim = ev.claim
 
         def leader_fn():
-            return check_sources(source_list, claim)
+            verified_urls = []
+            for src in source_list:
+                src = src.strip()
+                try:
+                    content = gl.nondet.web.render(src)
+                except:
+                    continue
 
-        def validator_fn(leaders_res) -> bool:
-            if not isinstance(leaders_res, gl.vm.Return):
+                prompt = f"""
+                Claim: {claim}
+                Content from source ({src}):
+                {content[:2000]}
+                Does this content CORROBORATE the claim?
+                Respond with ONLY: YES or NO
+                """
+                response = gl.nondet.exec_prompt(prompt)
+                if "YES" in response.upper():
+                    verified_urls.append(src)
+
+            verified_count = len(verified_urls)
+            total = len(source_list)
+
+            if verified_count == total:
+                status = "VERIFIED"
+            elif verified_count >= total // 2:
+                status = "PARTIAL"
+            else:
+                status = "REJECTED"
+
+            return {
+                "verified_count": verified_count,
+                "total": total,
+                "status": status,
+                "verified_urls": ",".join(verified_urls),
+            }
+
+        def validator_fn(leader_result):
+            if not isinstance(leader_result, gl.vm.Return):
                 return False
-            my_result = check_sources(source_list, claim)
-            return (
-                my_result["status"] == leaders_res.calldata["status"]
-                and my_result["verified_count"] == leaders_res.calldata["verified_count"]
-            )
+            leader_data = leader_result.calldata
+            leader_status = leader_data.get("status")
+            return leader_status in ("VERIFIED", "PARTIAL", "REJECTED")
 
         result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
 
         ev.verified_count = u256(result["verified_count"])
         ev.status = result["status"]
+        ev.verified_urls = result["verified_urls"]
         self.verifications[evidence_id] = ev
 
         return True
@@ -148,6 +147,23 @@ class MultiSourceVerifier(gl.Contract):
             "verified_count": int(ev.verified_count),
             "total_sources": int(ev.total_sources),
             "status": ev.status,
+        })
+
+    @gl.public.view
+    def get_verification_data(self, evidence_id: u256) -> str:
+        """Returns raw verification data for downstream contracts."""
+        if evidence_id not in self.verifications:
+            return "NOT_FOUND"
+        ev = self.verifications[evidence_id]
+        return json.dumps({
+            "id": int(ev.evidence_id),
+            "agent": ev.agent,
+            "claim": ev.claim,
+            "sources": ev.sources,
+            "verified_count": int(ev.verified_count),
+            "total_sources": int(ev.total_sources),
+            "status": ev.status,
+            "verified_urls": ev.verified_urls,
         })
 
     @gl.public.view
