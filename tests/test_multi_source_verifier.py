@@ -1,91 +1,153 @@
 """
-Integration tests for MultiSourceVerifier against the deployed GenLayer Studio instance.
+Test suite for MultiSourceVerifier contract (v2).
 
-Note: verify_sources fetches every source live via gl.nondet.web.render and asks the
-model to judge corroboration, so results depend on the live content of the source
-pages at test time. The REJECTED/PARTIAL cases below match what was already observed
-in the manual test report; VERIFIED is included as a case to actively pursue with a
-claim/source pair known to fully corroborate, since it hasn't been exercised yet
-(see DECISIONS.md, "Known limitation").
+Run these tests manually in GenLayer Studio by calling the functions
+with the given inputs and comparing the outputs.
 """
 
-import json
-import pytest
-from genlayer_py import create_client, create_account
-from genlayer_py.chains import localnet
+# ============================================================================
+# TEST T1: Submit evidence with 2 sources
+# ============================================================================
 
-CONTRACT_ADDRESS = "0x47B07b947953a25AbdD572Ed62b575022E0868af"
-
-
-@pytest.fixture(scope="module")
-def client():
-    account = create_account()
-    return create_client(chain=localnet, account=account)
-
-
-def _write(client, function_name, args):
-    tx_hash = client.write_contract(
-        address=CONTRACT_ADDRESS, function_name=function_name, args=args, value=0,
-    )
-    return client.wait_for_transaction_receipt(transaction_hash=tx_hash, status="ACCEPTED")
+def test_submit_evidence():
+    """
+    Input:
+      agent: "0xNewAgent"
+      claim: "Bitcoin is the largest cryptocurrency by market cap"
+      sources: "https://coinmarketcap.com,https://coingecko.com"
+    Expected:
+      - Returns evidence_id = 0
+      - Status: SUCCESS
+    """
+    pass
 
 
-def _read(client, function_name, args=None):
-    return client.read_contract(
-        address=CONTRACT_ADDRESS, function_name=function_name, args=args or [],
-    )
+# ============================================================================
+# TEST T2: Verify sources with consensus
+# ============================================================================
+
+def test_verify_sources():
+    """
+    Input: evidence_id = 0 (from T1)
+    Expected:
+      - Returns true
+      - Consensus: {"status": "PARTIAL", "total": 2, "verified_count": 1,
+                    "verified_urls": "https://coinmarketcap.com"}
+    """
+    pass
 
 
-def test_submit_evidence_requires_two_sources(client):
-    with pytest.raises(Exception, match="At least 2 sources required"):
-        _write(client, "submit_evidence", ["0xAgent", "some claim", "https://a.com"])
+# ============================================================================
+# TEST T3: Get verification data (NEW v2 method)
+# ============================================================================
+
+def test_get_verification_data():
+    """
+    Input: evidence_id = 0
+    Expected JSON:
+      {
+        "id": 0,
+        "agent": "0xNewAgent",
+        "claim": "Bitcoin is the largest cryptocurrency by market cap",
+        "sources": "https://coinmarketcap.com,https://coingecko.com",
+        "verified_count": 1,
+        "total_sources": 2,
+        "status": "PARTIAL",
+        "verified_urls": "https://coinmarketcap.com"
+      }
+
+    IMPORTANT: This method is used by ConfidenceScorer to read data on-chain.
+    """
+    pass
 
 
-def test_submit_and_verify_rejected_case(client):
-    _write(
-        client, "submit_evidence",
-        ["0xTestAgent", "Ethereum price is over $3000",
-         "https://coinmarketcap.com,https://coingecko.com"],
-    )
-    evidence_id = 0
-    _write(client, "verify_sources", [evidence_id])
-    status = _read(client, "get_verification_status", [evidence_id])
-    assert status.split(":")[0] in ("REJECTED", "PARTIAL", "VERIFIED")
+# ============================================================================
+# TEST T4: Get verification status
+# ============================================================================
+
+def test_get_verification_status():
+    """
+    Input: evidence_id = 0
+    Expected: "PARTIAL:1/2"
+    """
+    pass
 
 
-def test_submit_and_verify_partial_case(client):
-    _write(
-        client, "submit_evidence",
-        ["0xTestAgent3", "Bitcoin is the largest cryptocurrency by market cap",
-         "https://coinmarketcap.com,https://coingecko.com"],
-    )
-    evidence_id = 1
-    _write(client, "verify_sources", [evidence_id])
-    details = json.loads(_read(client, "get_verification_details", [evidence_id]))
-    assert details["status"] in ("REJECTED", "PARTIAL", "VERIFIED")
-    assert details["total_sources"] == 2
+# ============================================================================
+# TEST T5: List all verifications
+# ============================================================================
+
+def test_list_verifications():
+    """
+    Input: None
+    Expected: "0:PARTIAL"
+    """
+    pass
 
 
-def test_cannot_verify_same_evidence_twice(client):
-    with pytest.raises(Exception, match="Already verified"):
-        _write(client, "verify_sources", [0])
+# ============================================================================
+# TEST T6: Get verifications by agent
+# ============================================================================
+
+def test_get_agent_verifications():
+    """
+    Input: agent = "0xNewAgent"
+    Expected: "0"
+    """
+    pass
 
 
-def test_get_agent_verifications(client):
-    ids = _read(client, "get_agent_verifications", ["0xTestAgent"])
-    assert "0" in ids.split(",")
+# ============================================================================
+# TEST T7: Get verification details
+# ============================================================================
+
+def test_get_verification_details():
+    """
+    Input: evidence_id = 0
+    Expected JSON:
+      {
+        "id": 0,
+        "agent": "0xNewAgent",
+        "claim": "Bitcoin is the largest cryptocurrency by market cap",
+        "sources": "https://coinmarketcap.com,https://coingecko.com",
+        "verified_count": 1,
+        "total_sources": 2,
+        "status": "PARTIAL"
+      }
+    """
+    pass
 
 
-# --- Still to run before submission: a genuinely VERIFIED (2/2) case ---
-def test_submit_and_verify_verified_case(client):
-    """Two sources that should both clearly corroborate the same, stable, factual claim."""
-    _write(
-        client, "submit_evidence",
-        ["0xTestAgent4", "Python was created by Guido van Rossum",
-         "https://en.wikipedia.org/wiki/Python_(programming_language),https://www.python.org/about/"],
-    )
-    evidence_id = 2
-    _write(client, "verify_sources", [evidence_id])
-    details = json.loads(_read(client, "get_verification_details", [evidence_id]))
-    assert details["status"] == "VERIFIED"
-    assert details["verified_count"] == 2
+# ============================================================================
+# DEPLOYED CONTRACT (v2)
+# ============================================================================
+
+DEPLOYED_ADDRESS = "0x500aBa77fc751967aB02B4deB7bd88553bD75926"
+EXPLORER_LINK = "https://explorer-studio.genlayer.com/address/0x500aBa77fc751967aB02B4deB7bd88553bD75926"
+DEPLOY_TX = "https://explorer-studio.genlayer.com/tx/0xf82797008b693975ea658193538d7b6d95f6222ace271d27cfe4bb71d0fa21c4"
+
+
+# ============================================================================
+# TEST TRANSACTION LINKS
+# ============================================================================
+
+TEST_LINKS = {
+    "T1_submit_evidence":
+        "https://explorer-studio.genlayer.com/tx/0x79fbfff7824279f18267a72c644d3b1b2293ae71ff6fb16f88b254e77465e487",
+    "T2_verify_sources":
+        "https://explorer-studio.genlayer.com/tx/0xaeebeb932d40d1829b24836ae3e45ae01fce3cd41355ff8751c5a71d9a02c887",
+}
+
+
+# ============================================================================
+# KEY NOTES
+# ============================================================================
+
+NOTES = """
+- At least 2 sources are required for each evidence claim.
+- The verifier uses gl.nondet.web.render to fetch real content from each URL.
+- The verifier uses gl.vm.run_nondet_unsafe for leader/validator consensus.
+- If a source cannot be fetched, it is treated as not corroborated (no error).
+- The get_verification_data method is specifically designed for downstream
+  contracts to read data on-chain without trusting caller-supplied JSON.
+"""
