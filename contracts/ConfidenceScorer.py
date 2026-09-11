@@ -14,34 +14,42 @@ class ConfidenceRecord:
     trust_score: u256
     source_count: u256
     final_score: u256
-    status: str  # PENDING, APPROVED, REJECTED
+    status: str
+    verifier_address: str
 
 
 class ConfidenceScorer(gl.Contract):
     scores: TreeMap[u256, ConfidenceRecord]
     next_id: u256
+    verifier_contract: str
 
-    def __init__(self):
+    def __init__(self, verifier_address: str):
         self.next_id = u256(0)
+        self.verifier_contract = verifier_address
 
     @gl.public.write
-    def calculate_score(self, verification_id: u256, verification_details: str) -> u256:
-        assert verification_details.strip() != "", "Details cannot be empty"
+    def calculate_score(self, verification_id: u256) -> u256:
+        """Calculates score by reading verification data from MultiSourceVerifier on-chain."""
+        
+        # Read verification data from upstream contract
+        verifier_data_raw = gl.get_contract_at(
+            Address(self.verifier_contract)
+        ).view().get_verification_data(verification_id)
 
-        # Parse verification details
+        assert verifier_data_raw != "NOT_FOUND", "Verification not found in upstream contract"
+
         try:
-            data = json.loads(verification_details)
+            data = json.loads(verifier_data_raw)
         except:
-            raise gl.vm.UserError("Invalid JSON format")
+            raise gl.vm.UserError("Invalid data from verifier contract")
 
         verified_count = data.get("verified_count", 0)
         total_sources = data.get("total_sources", 1)
         status = data.get("status", "PENDING")
 
-        # Calculate trust score based on verified sources
+        # Calculate trust score
         base_score = (verified_count / total_sources) * 100
 
-        # Adjust based on status
         if status == "VERIFIED":
             multiplier = 1.0
         elif status == "PARTIAL":
@@ -50,8 +58,6 @@ class ConfidenceScorer(gl.Contract):
             multiplier = 0.3
 
         final_score = int(base_score * multiplier)
-
-        # Clamp to 0-100
         final_score = min(100, max(0, final_score))
 
         eid = self.next_id
@@ -64,6 +70,7 @@ class ConfidenceScorer(gl.Contract):
             source_count=u256(total_sources),
             final_score=u256(final_score),
             status="APPROVED" if final_score >= 50 else "REJECTED",
+            verifier_address=self.verifier_contract,
         )
 
         return eid
@@ -77,6 +84,22 @@ class ConfidenceScorer(gl.Contract):
 
     @gl.public.view
     def get_score_details(self, evidence_id: u256) -> str:
+        if evidence_id not in self.scores:
+            return "NOT_FOUND"
+        sc = self.scores[evidence_id]
+        return json.dumps({
+            "id": int(sc.evidence_id),
+            "verification_id": int(sc.verification_id),
+            "trust_score": int(sc.trust_score),
+            "source_count": int(sc.source_count),
+            "final_score": int(sc.final_score),
+            "status": sc.status,
+            "verifier_address": sc.verifier_address,
+        })
+
+    @gl.public.view
+    def get_score_data(self, evidence_id: u256) -> str:
+        """Returns raw score data for downstream contracts."""
         if evidence_id not in self.scores:
             return "NOT_FOUND"
         sc = self.scores[evidence_id]
