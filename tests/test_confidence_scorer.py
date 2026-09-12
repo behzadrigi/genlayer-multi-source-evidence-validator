@@ -1,5 +1,7 @@
 """
-Test suite for ConfidenceScorer contract (v2).
+# test_confidence_scorer.py
+
+Test suite for ConfidenceScorer contract.
 
 Run these tests manually in GenLayer Studio by calling the functions
 with the given inputs and comparing the outputs.
@@ -11,13 +13,13 @@ with the given inputs and comparing the outputs.
 
 def test_calculate_score():
     """
-    Input: verification_id = 0
+    Input: verification_id = 3
     Note: This method reads verification data directly from MultiSourceVerifier
           on-chain using gl.get_contract_at(). No JSON is passed by the caller.
 
     Expected:
-      - Returns score_id = 0
-      - Status: SUCCESS
+      - Returns score_id = 1
+    Tx: 0xeb631b1096fa356aff3af572aa6a912afcce64ac4c7f87df27daa10da07d2935
 
     Upstream: MultiSourceVerifier at 0x500aBa77fc751967aB02B4deB7bd88553bD75926
     """
@@ -25,66 +27,69 @@ def test_calculate_score():
 
 
 # ============================================================================
-# TEST T2: Get score
+# TEST T2: Get score (APPROVED)
 # ============================================================================
 
 def test_get_score():
     """
-    Input: evidence_id = 0
-    Expected: "REJECTED:35"
+    Input: evidence_id = 1
+    Expected: "APPROVED:100"
 
     Explanation:
-      - verification_id 0 had status PARTIAL with 1/2 sources verified
-      - base_score = (1/2) * 100 = 50
-      - multiplier for PARTIAL = 0.7
-      - final_score = 50 * 0.7 = 35
-      - since 35 < 50, status is REJECTED
+      - verification_id 3 had status VERIFIED with 2/2 sources verified
+      - base_score = (2/2) * 100 = 100
+      - multiplier for VERIFIED = 1.0
+      - final_score = 100
+      - since 100 >= 50, status is APPROVED
     """
     pass
 
 
 # ============================================================================
-# TEST T3: Get score details
+# TEST T3: Get score details (agent read from on-chain)
 # ============================================================================
 
 def test_get_score_details():
     """
-    Input: evidence_id = 0
+    Input: evidence_id = 1
     Expected JSON:
       {
-        "id": 0,
-        "verification_id": 0,
-        "trust_score": 35,
+        "id": 1,
+        "verification_id": 3,
+        "agent": "0xNewAgent",
+        "trust_score": 100,
         "source_count": 2,
-        "final_score": 35,
-        "status": "REJECTED",
+        "final_score": 100,
+        "status": "APPROVED",
         "verifier_address": "0x500aBa77fc751967aB02B4deB7bd88553bD75926"
       }
 
-    IMPORTANT: The verifier_address field proves that this score was
-    calculated from a real on-chain verification record.
+    IMPORTANT: The agent field is read from the on-chain verification record,
+    not from caller input. This prevents agent spoofing.
     """
     pass
 
 
 # ============================================================================
-# TEST T4: Get score data (NEW v2 method)
+# TEST T4: Get score data (used by ReputationGuardian)
 # ============================================================================
 
 def test_get_score_data():
     """
-    Input: evidence_id = 0
+    Input: evidence_id = 1
     Expected JSON:
       {
-        "id": 0,
-        "verification_id": 0,
-        "trust_score": 35,
+        "id": 1,
+        "verification_id": 3,
+        "agent": "0xNewAgent",
+        "trust_score": 100,
         "source_count": 2,
-        "final_score": 35,
-        "status": "REJECTED"
+        "final_score": 100,
+        "status": "APPROVED"
       }
 
-    IMPORTANT: This method is used by ReputationGuardian to read data on-chain.
+    IMPORTANT: This method is used by ReputationGuardian to read data on-chain,
+    including the agent field.
     """
     pass
 
@@ -96,18 +101,18 @@ def test_get_score_data():
 def test_list_scores():
     """
     Input: None
-    Expected: "0:REJECTED"
+    Expected: contains "1:APPROVED"
     """
     pass
 
 
 # ============================================================================
-# DEPLOYED CONTRACT (v2)
+# DEPLOYED CONTRACT
 # ============================================================================
 
-DEPLOYED_ADDRESS = "0xC8c2Eb37AF740bC4f327C4D0fe3D26BF3D6C401C"
-EXPLORER_LINK = "https://explorer-studio.genlayer.com/address/0xC8c2Eb37AF740bC4f327C4D0fe3D26BF3D6C401C"
-DEPLOY_TX = "https://explorer-studio.genlayer.com/tx/0x10dd6110c08a58027a8a9bc2632df57ae0c09f216e59b372ff9aae19cb045da3"
+DEPLOYED_ADDRESS = "0xaAFfC3090370149b1187268475A678692D49Ef40"
+EXPLORER_LINK = "https://explorer-studio.genlayer.com/address/0xaAFfC3090370149b1187268475A678692D49Ef40"
+DEPLOY_TX = "https://explorer-studio.genlayer.com/tx/0x1d25fc8b35e42929405fa84efada4db97e1fad0bc3090058375a23747b4258b6"
 
 UPSTREAM_CONTRACT = "0x500aBa77fc751967aB02B4deB7bd88553bD75926"
 
@@ -118,7 +123,7 @@ UPSTREAM_CONTRACT = "0x500aBa77fc751967aB02B4deB7bd88553bD75926"
 
 TEST_LINKS = {
     "T1_calculate_score":
-        "https://explorer-studio.genlayer.com/tx/0xa52363aa4792a93293749746e6842568ee6c0625becbbb92d5f1fc06ab0ea59e",
+        "https://explorer-studio.genlayer.com/tx/0xeb631b1096fa356aff3af572aa6a912afcce64ac4c7f87df27daa10da07d2935",
 }
 
 
@@ -147,6 +152,8 @@ NOTES = """
 - This contract does NOT accept verification JSON from the caller.
 - Instead, it reads verification data directly from MultiSourceVerifier
   on-chain using gl.get_contract_at(Address(...)).view().get_verification_data().
+- The agent field is read from the on-chain verification record and stored
+  in ConfidenceRecord. This prevents agent spoofing.
 - The verifier_address field in every score record proves the source of truth.
 - This design prevents any caller from fabricating an approved score.
 """
