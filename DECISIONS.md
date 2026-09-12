@@ -19,7 +19,7 @@ The MultiSourceVerifier requires at least 2 independent sources for each evidenc
 ## 2. Why URL Normalization?
 
 ### Problem
-Without normalization, the same URL could be written in many different ways (`http://`, `https://`, trailing slash, extra spaces), leading to inconsistent verification results.
+Without normalization, the same URL could be written in many different ways (http://, https://, trailing slash, extra spaces), leading to inconsistent verification results.
 
 ### Solution
 The SourceNormalizer cleans and normalizes all URLs before they reach the verification stage. It also blocks dangerous domains and rewards trusted ones with a higher trust score.
@@ -57,8 +57,8 @@ In v1, downstream contracts (ConfidenceScorer, ReputationGuardian) trusted calle
 ### Solution
 Each downstream contract now reads its input directly from the upstream contract on-chain:
 
-- ConfidenceScorer stores the MultiSourceVerifier address and calls `get_verification_data()` on-chain.
-- ReputationGuardian stores the ConfidenceScorer address and calls `get_score_data()` on-chain.
+- ConfidenceScorer stores the MultiSourceVerifier address and calls get_verification_data() on-chain.
+- ReputationGuardian stores the ConfidenceScorer address and calls get_score_data() on-chain.
 
 ### Why This Matters
 1. Only verified on-chain data can influence reputation.
@@ -71,13 +71,61 @@ Each downstream contract now reads its input directly from the upstream contract
 
 ---
 
-## 5. Why Include Verified URLs in Storage?
+## 5. Why Bind Agent to On-Chain Record (v3)?
+
+### Problem
+In v2, apply_reputation_change() still accepted agent as a parameter from caller. This meant a caller could pair a legitimate APPROVED score_id (belonging to one agent) with an arbitrary agent, and change that agent's reputation based on evidence that was never about them.
+
+### Solution
+The agent is now read from the on-chain verification record and propagated through the chain:
+
+- MultiSourceVerifier stores agent in VerificationRecord.
+- ConfidenceScorer reads agent from get_verification_data() and stores it in ConfidenceRecord.
+- ReputationGuardian reads agent from get_score_data() and never accepts it from caller.
+
+### Why This Matters
+1. Agent spoofing is now impossible.
+2. Every reputation change is tied to the correct agent automatically.
+3. The chain of trust is complete from evidence submission to reputation change.
+
+### Trade-off
+- ConfidenceRecord now stores an extra field (agent).
+- But the security guarantee is essential.
+
+---
+
+## 6. Why Prevent Double-Application (v4)?
+
+### Problem
+In v3, if someone called apply_reputation_change(score_id=1) twice, the reputation would be increased twice for the same evidence.
+
+### Solution
+Added an applied_scores map that tracks which score_ids have already been applied:
+
+```python
+assert score_id not in self.applied_scores, "Score already applied"
+# ... apply change ...
+self.applied_scores[score_id] = True
+```
+
+### Why This Matters
+1. Double-application attack is now prevented.
+2. Each score can only affect reputation once.
+3. The system is idempotent with respect to score_id.
+
+### Trade-off
+- One extra storage map per contract.
+- But the protection is essential for any scoring system.
+
+---
+
+## 7. Why Include Verified URLs in Storage?
 
 ### Problem
 Downstream contracts need to know not just how many sources were verified, but which specific sources were verified.
 
 ### Solution
-The VerificationRecord stores a `verified_urls` field as a comma-separated string.
+The VerificationRecord stores a verified_urls field as a comma-separated string.
 
 ### Trade-off
 - Storing URLs increases storage usage slightly.
@@ -85,7 +133,7 @@ The VerificationRecord stores a `verified_urls` field as a comma-separated strin
 
 ---
 
-## 6. Why Two Separate Downstream Contracts?
+## 8. Why Two Separate Downstream Contracts?
 
 ### Problem
 Why not combine ConfidenceScorer and ReputationGuardian into a single contract?
@@ -102,13 +150,13 @@ Separating them provides:
 
 ---
 
-## 7. Why Use gl.vm.run_nondet_unsafe Instead of Simple LLM Calls?
+## 9. Why Use gl.vm.run_nondet_unsafe Instead of Simple LLM Calls?
 
 ### Problem
 A single LLM call could be manipulated or produce inconsistent results.
 
 ### Solution
-The MultiSourceVerifier uses `gl.vm.run_nondet_unsafe` with a leader/validator pattern:
+The MultiSourceVerifier uses gl.vm.run_nondet_unsafe with a leader/validator pattern:
 - The leader fetches content and asks the LLM to check corroboration.
 - Independent validators verify the leader's result.
 - Consensus is required for the result to be accepted.
@@ -119,15 +167,15 @@ The MultiSourceVerifier uses `gl.vm.run_nondet_unsafe` with a leader/validator p
 
 ---
 
-## 8. Why Expose `get_..._data` View Methods?
+## 10. Why Expose get_..._data View Methods?
 
 ### Problem
 Downstream contracts need to read structured data from upstream contracts without parsing complex JSON.
 
 ### Solution
 Each upstream contract exposes a dedicated view method:
-- `get_verification_data(evidence_id)` in MultiSourceVerifier
-- `get_score_data(evidence_id)` in ConfidenceScorer
+- get_verification_data(evidence_id) in MultiSourceVerifier
+- get_score_data(evidence_id) in ConfidenceScorer
 
 These methods return a clean, minimal JSON payload specifically designed for downstream consumption.
 
@@ -144,7 +192,9 @@ These methods return a clean, minimal JSON payload specifically designed for dow
 | Multi-source verification | Reduces single point of failure |
 | URL normalization | Prevents inconsistencies and attacks |
 | Deterministic scoring | Fast, cheap, predictable |
-| Contract chaining | Prevents fabrication of scores |
+| Contract chaining (v2) | Prevents fabrication of scores |
+| Agent binding (v3) | Prevents agent spoofing |
+| Double-application prevention (v4) | Each score applies only once |
 | Store verified URLs | Full transparency and traceability |
 | Separate downstream contracts | Modular, testable, upgradable |
 | Use gl.vm.run_nondet_unsafe | Real independent verification |
