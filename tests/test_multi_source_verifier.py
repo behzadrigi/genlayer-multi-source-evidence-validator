@@ -1,5 +1,7 @@
 """
-Test suite for MultiSourceVerifier contract (v2).
+# test_multi_source_verifier.py
+
+Test suite for MultiSourceVerifier contract.
 
 Run these tests manually in GenLayer Studio by calling the functions
 with the given inputs and comparing the outputs.
@@ -13,50 +15,49 @@ def test_submit_evidence():
     """
     Input:
       agent: "0xNewAgent"
-      claim: "Bitcoin is the largest cryptocurrency by market cap"
-      sources: "https://coinmarketcap.com,https://coingecko.com"
+      claim: "Bitcoin is a cryptocurrency"
+      sources: "https://coinmarketcap.com,https://en.wikipedia.org/wiki/Bitcoin"
     Expected:
-      - Returns evidence_id = 0
-      - Status: SUCCESS
+      - Returns evidence_id = 3
+    Tx: 0xbd8505989a1c724b2c49816230023e5e2e2478ee8f013e743048b257ce71b4c9
     """
     pass
 
 
 # ============================================================================
-# TEST T2: Verify sources with consensus
+# TEST T2: Verify sources with consensus (VERIFIED)
 # ============================================================================
 
 def test_verify_sources():
     """
-    Input: evidence_id = 0 (from T1)
+    Input: evidence_id = 3
     Expected:
       - Returns true
-      - Consensus: {"status": "PARTIAL", "total": 2, "verified_count": 1,
-                    "verified_urls": "https://coinmarketcap.com"}
+      - Consensus: {"status": "VERIFIED", "total": 2, "verified_count": 2,
+                    "verified_urls": "https://coinmarketcap.com,https://en.wikipedia.org/wiki/Bitcoin"}
+    Tx: 0x86a8d7a47e7a95bf393036d34d9dd55315abb89bb2132bf4a87146ff60170bb9
     """
     pass
 
 
 # ============================================================================
-# TEST T3: Get verification data (NEW v2 method)
+# TEST T3: Get verification data
 # ============================================================================
 
 def test_get_verification_data():
     """
-    Input: evidence_id = 0
+    Input: evidence_id = 3
     Expected JSON:
       {
-        "id": 0,
+        "id": 3,
         "agent": "0xNewAgent",
-        "claim": "Bitcoin is the largest cryptocurrency by market cap",
-        "sources": "https://coinmarketcap.com,https://coingecko.com",
-        "verified_count": 1,
+        "claim": "Bitcoin is a cryptocurrency",
+        "sources": "https://coinmarketcap.com,https://en.wikipedia.org/wiki/Bitcoin",
+        "verified_count": 2,
         "total_sources": 2,
-        "status": "PARTIAL",
-        "verified_urls": "https://coinmarketcap.com"
+        "status": "VERIFIED",
+        "verified_urls": "https://coinmarketcap.com,https://en.wikipedia.org/wiki/Bitcoin"
       }
-
-    IMPORTANT: This method is used by ConfidenceScorer to read data on-chain.
     """
     pass
 
@@ -67,8 +68,8 @@ def test_get_verification_data():
 
 def test_get_verification_status():
     """
-    Input: evidence_id = 0
-    Expected: "PARTIAL:1/2"
+    Input: evidence_id = 3
+    Expected: "VERIFIED:2/2"
     """
     pass
 
@@ -80,7 +81,7 @@ def test_get_verification_status():
 def test_list_verifications():
     """
     Input: None
-    Expected: "0:PARTIAL"
+    Expected: contains "3:VERIFIED"
     """
     pass
 
@@ -92,7 +93,7 @@ def test_list_verifications():
 def test_get_agent_verifications():
     """
     Input: agent = "0xNewAgent"
-    Expected: "0"
+    Expected: contains "3"
     """
     pass
 
@@ -103,23 +104,23 @@ def test_get_agent_verifications():
 
 def test_get_verification_details():
     """
-    Input: evidence_id = 0
+    Input: evidence_id = 3
     Expected JSON:
       {
-        "id": 0,
+        "id": 3,
         "agent": "0xNewAgent",
-        "claim": "Bitcoin is the largest cryptocurrency by market cap",
-        "sources": "https://coinmarketcap.com,https://coingecko.com",
-        "verified_count": 1,
+        "claim": "Bitcoin is a cryptocurrency",
+        "sources": "https://coinmarketcap.com,https://en.wikipedia.org/wiki/Bitcoin",
+        "verified_count": 2,
         "total_sources": 2,
-        "status": "PARTIAL"
+        "status": "VERIFIED"
       }
     """
     pass
 
 
 # ============================================================================
-# DEPLOYED CONTRACT (v2)
+# DEPLOYED CONTRACT
 # ============================================================================
 
 DEPLOYED_ADDRESS = "0x500aBa77fc751967aB02B4deB7bd88553bD75926"
@@ -133,9 +134,9 @@ DEPLOY_TX = "https://explorer-studio.genlayer.com/tx/0xf82797008b693975ea6581935
 
 TEST_LINKS = {
     "T1_submit_evidence":
-        "https://explorer-studio.genlayer.com/tx/0x79fbfff7824279f18267a72c644d3b1b2293ae71ff6fb16f88b254e77465e487",
+        "https://explorer-studio.genlayer.com/tx/0xbd8505989a1c724b2c49816230023e5e2e2478ee8f013e743048b257ce71b4c9",
     "T2_verify_sources":
-        "https://explorer-studio.genlayer.com/tx/0xaeebeb932d40d1829b24836ae3e45ae01fce3cd41355ff8751c5a71d9a02c887",
+        "https://explorer-studio.genlayer.com/tx/0x86a8d7a47e7a95bf393036d34d9dd55315abb89bb2132bf4a87146ff60170bb9",
 }
 
 
@@ -150,4 +151,5 @@ NOTES = """
 - If a source cannot be fetched, it is treated as not corroborated (no error).
 - The get_verification_data method is specifically designed for downstream
   contracts to read data on-chain without trusting caller-supplied JSON.
+- The agent field is stored here and propagated through the entire chain.
 """
