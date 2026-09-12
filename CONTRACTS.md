@@ -6,10 +6,10 @@ This document describes the four intelligent contracts in the GenLayer Multi-Sou
 
 | Contract | Purpose | Consensus Pattern |
 | :--- | :--- | :--- |
-| SourceNormalizer | Normalizes and validates evidence source URLs | Deterministic (no LLM) |
+| SourceNormalizer | Normalizes and validates evidence source URLs | Deterministic |
 | MultiSourceVerifier | Verifies evidence from multiple sources using real consensus | Custom leader/validator with gl.nondet.web.render and gl.vm.run_nondet_unsafe |
-| ConfidenceScorer | Calculates confidence score, reads on-chain from MultiSourceVerifier | Deterministic (no LLM) |
-| ReputationGuardian | Manages reputation changes, reads on-chain from ConfidenceScorer | Deterministic (no LLM) |
+| ConfidenceScorer | Calculates confidence score, reads on-chain from MultiSourceVerifier | Deterministic |
+| ReputationGuardian | Manages reputation changes, reads on-chain from ConfidenceScorer, prevents double-application | Deterministic |
 
 ---
 
@@ -84,7 +84,7 @@ class VerificationRecord:
 ### Read Methods
 - `get_verification_status(evidence_id: u256) -> str`
 - `get_verification_details(evidence_id: u256) -> str`
-- `get_verification_data(evidence_id: u256) -> str` - NEW: raw data for downstream contracts
+- `get_verification_data(evidence_id: u256) -> str` - raw data for downstream contracts
 - `list_verifications() -> str`
 - `get_agent_verifications(agent: str) -> str`
 
@@ -125,6 +125,7 @@ def __init__(self, verifier_address: str):
 class ConfidenceRecord:
     evidence_id: u256
     verification_id: u256
+    agent: str
     trust_score: u256
     source_count: u256
     final_score: u256
@@ -138,7 +139,7 @@ class ConfidenceRecord:
 ### Read Methods
 - `get_score(evidence_id: u256) -> str`
 - `get_score_details(evidence_id: u256) -> str`
-- `get_score_data(evidence_id: u256) -> str` - NEW: raw data for downstream contracts
+- `get_score_data(evidence_id: u256) -> str` - raw data for downstream contracts
 - `list_scores() -> str`
 
 ### Scoring Formula
@@ -152,6 +153,7 @@ status = APPROVED if final_score >= 50 else REJECTED
 ### Security
 - Does NOT trust caller-supplied JSON
 - Reads verification data directly from MultiSourceVerifier on-chain using gl.get_contract_at()
+- Reads agent from the on-chain verification record, not from caller
 
 ---
 
@@ -171,6 +173,7 @@ def __init__(self, scorer_address: str):
 - `changes: TreeMap[u256, ReputationChange]` - stores reputation changes
 - `next_id: u256` - counter for change IDs
 - `reputation: TreeMap[str, u256]` - agent reputation scores
+- `applied_scores: TreeMap[u256, bool]` - tracks applied score IDs
 - `scorer_contract: str` - address of ConfidenceScorer contract
 
 ### Storage Structure
@@ -188,11 +191,12 @@ class ReputationChange:
 ```
 
 ### Write Methods
-- `apply_reputation_change(agent: str, score_id: u256) -> u256` - reads from ConfidenceScorer on-chain, returns change_id
+- `apply_reputation_change(score_id: u256) -> u256` - reads from ConfidenceScorer on-chain, returns change_id
 - `initialize_reputation(agent: str, initial_score: u256)` - sets initial reputation
 
 ### Read Methods
 - `get_reputation(agent: str) -> str`
+- `is_score_applied(score_id: u256) -> str`
 - `get_change_status(change_id: u256) -> str`
 - `get_change_details(change_id: u256) -> str`
 - `list_changes() -> str`
@@ -207,19 +211,22 @@ class ReputationChange:
 ### Security
 - Does NOT trust caller-supplied JSON
 - Reads score data directly from ConfidenceScorer on-chain using gl.get_contract_at()
+- Reads agent from the on-chain score record, never from caller
+- Each score_id can only be applied once via applied_scores map
 
 ---
 
 ## Contract Chaining
 
-The v2 architecture uses on-chain chaining:
+The v4 architecture uses on-chain chaining:
 
 ```
-SourceNormalizer → MultiSourceVerifier → ConfidenceScorer → ReputationGuardian
+SourceNormalizer -> MultiSourceVerifier -> ConfidenceScorer -> ReputationGuardian
 ```
 
 - ConfidenceScorer holds MultiSourceVerifier address
 - ReputationGuardian holds ConfidenceScorer address
 - Each downstream contract reads from upstream using gl.get_contract_at(Address(...)).view().get_..._data()
+- The agent is propagated from the verification record through the entire chain
 
-This prevents fabrication of approved scores and ensures every reputation change is backed by a verified evidence record.
+This prevents fabrication of approved scores, agent spoofing, and double-application.
