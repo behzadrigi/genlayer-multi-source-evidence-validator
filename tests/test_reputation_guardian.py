@@ -1,7 +1,7 @@
 """
 # test_reputation_guardian.py
 
-Test suite for ReputationGuardian contract.
+Test suite for ReputationGuardian contract (v5).
 
 Run these tests manually in GenLayer Studio by calling the functions
 with the given inputs and comparing the outputs.
@@ -14,41 +14,53 @@ with the given inputs and comparing the outputs.
 def test_initialize_reputation():
     """
     Input:
-      agent: "0xNewAgent2"
+      agent: "0xTestAgent"
       initial_score: 50
     Expected:
       - Status: SUCCESS
-    Tx: 0x9556e990518991e845cbfb9de8e68f5e320af0bc85f870c663a47a6e3a14f6be
+    Tx: 0x6441fcbc40594d3fded4f78d0186a50f287aa9e22d6ecdfa561336133f09a80e
     """
     pass
 
 
 # ============================================================================
-# TEST T2: Apply reputation change (INCREASE path, agent from on-chain)
+# TEST T2: Get reputation (initial)
+# ============================================================================
+
+def test_get_reputation_initial():
+    """
+    Input: agent = "0xTestAgent"
+    Expected: "REPUTATION:50"
+    """
+    pass
+
+
+# ============================================================================
+# TEST T3: Apply reputation change (INCREASE path, agent from on-chain)
 # ============================================================================
 
 def test_apply_reputation_change_increase():
     """
     Input:
-      score_id: 1
+      score_id: 0
     Note: This method reads score data directly from ConfidenceScorer
           on-chain using gl.get_contract_at(). No JSON is passed by the caller.
           The agent is read from the score record, not from caller input.
 
     Expected:
       - Returns change_id = 0
-    Tx: 0x3e1c6a70421d56255f28a2b6f66ce19450a4c921c9f455640f47fba4b1106afc
+    Tx: 0x5cb5e18136bbae1f71012645ae40bd237f67d917c7223047bfc0432ccfd2dd9c
     """
     pass
 
 
 # ============================================================================
-# TEST T3: Get reputation after change
+# TEST T4: Get reputation after change
 # ============================================================================
 
 def test_get_reputation_after_change():
     """
-    Input: agent = "0xNewAgent"
+    Input: agent = "0xTestAgent"
     Expected: "REPUTATION:100"
 
     Explanation:
@@ -61,13 +73,13 @@ def test_get_reputation_after_change():
 
 
 # ============================================================================
-# TEST T4: Apply same score_id again (should be blocked)
+# TEST T5: Apply same score_id again (should be blocked)
 # ============================================================================
 
 def test_apply_reputation_change_double():
     """
     Input:
-      score_id: 1  (same as T2)
+      score_id: 0  (same as T3)
     Expected:
       - Status: ERROR
       - Error: "Score already applied"
@@ -75,25 +87,25 @@ def test_apply_reputation_change_double():
     Explanation:
       - applied_scores map tracks score_ids that have been applied
       - This prevents double-application attacks
-    Tx: 0x50cb7cccaed5cd7cc43064a019726f51f4f8c7f3b2800cdee7dadf8f1b1abcd3
+    Tx: 0x1cc293005fdc1971ed83222870b3ca23ac0aad7497cb0f2eb252d17bd765661e
     """
     pass
 
 
 # ============================================================================
-# TEST T5: Check if score is applied
+# TEST T6: Check if score is applied
 # ============================================================================
 
 def test_is_score_applied():
     """
-    Input: score_id = 1
+    Input: score_id = 0
     Expected: "APPLIED"
     """
     pass
 
 
 # ============================================================================
-# TEST T6: Get change status
+# TEST T7: Get change status
 # ============================================================================
 
 def test_get_change_status():
@@ -105,7 +117,7 @@ def test_get_change_status():
 
 
 # ============================================================================
-# TEST T7: Get change details
+# TEST T8: Get change details
 # ============================================================================
 
 def test_get_change_details():
@@ -114,37 +126,37 @@ def test_get_change_details():
     Expected JSON:
       {
         "id": 0,
-        "agent": "0xNewAgent",
-        "score_id": 1,
+        "agent": "0xTestAgent",
+        "score_id": 0,
         "final_score": 100,
         "change_type": "INCREASE",
         "status": "APPLIED",
-        "scorer_address": "0xaAFfC3090370149b1187268475A678692D49Ef40"
+        "scorer_address": "0x0eac9A014d9ab01F038E6C32d9dC4CDa23749F4a"
       }
     """
     pass
 
 
 # ============================================================================
-# TEST T8: List all changes
+# TEST T9: List all changes
 # ============================================================================
 
 def test_list_changes():
     """
     Input: None
-    Expected: contains "0:INCREASE:APPLIED"
+    Expected: "0:INCREASE:APPLIED"
     """
     pass
 
 
 # ============================================================================
-# TEST T9: Get agent changes
+# TEST T10: Get agent changes
 # ============================================================================
 
 def test_get_agent_changes():
     """
-    Input: agent = "0xNewAgent"
-    Expected: contains "0"
+    Input: agent = "0xTestAgent"
+    Expected: "0"
     """
     pass
 
@@ -153,11 +165,11 @@ def test_get_agent_changes():
 # DEPLOYED CONTRACT
 # ============================================================================
 
-DEPLOYED_ADDRESS = "0x96e280F36f0a430F41E8140945c7b238042e1Faf"
-EXPLORER_LINK = "https://explorer-studio.genlayer.com/address/0x96e280F36f0a430F41E8140945c7b238042e1Faf"
-DEPLOY_TX = "https://explorer-studio.genlayer.com/tx/0xc2eaf0aadbcd0630a9f781589656991627cfd71285098fcfa67ac8f1b71a4ac0"
+DEPLOYED_ADDRESS = "0xa08c273F5288c9924d9cE7e681802D19E254bAc7"
+EXPLORER_LINK = "https://explorer-studio.genlayer.com/address/0xa08c273F5288c9924d9cE7e681802D19E254bAc7"
+DEPLOY_TX = "https://explorer-studio.genlayer.com/tx/0x62afb5681904dcfed46985dca59996fe4a8faf4f8a084772c53ffe713d1af400"
 
-UPSTREAM_CONTRACT = "0xaAFfC3090370149b1187268475A678692D49Ef40"
+UPSTREAM_CONTRACT = "0x0eac9A014d9ab01F038E6C32d9dC4CDa23749F4a"
 
 
 # ============================================================================
@@ -166,11 +178,11 @@ UPSTREAM_CONTRACT = "0xaAFfC3090370149b1187268475A678692D49Ef40"
 
 TEST_LINKS = {
     "T1_initialize_reputation":
-        "https://explorer-studio.genlayer.com/tx/0x9556e990518991e845cbfb9de8e68f5e320af0bc85f870c663a47a6e3a14f6be",
-    "T2_apply_reputation_change_increase":
-        "https://explorer-studio.genlayer.com/tx/0x3e1c6a70421d56255f28a2b6f66ce19450a4c921c9f455640f47fba4b1106afc",
-    "T4_apply_reputation_change_double":
-        "https://explorer-studio.genlayer.com/tx/0x50cb7cccaed5cd7cc43064a019726f51f4f8c7f3b2800cdee7dadf8f1b1abcd3",
+        "https://explorer-studio.genlayer.com/tx/0x6441fcbc40594d3fded4f78d0186a50f287aa9e22d6ecdfa561336133f09a80e",
+    "T3_apply_reputation_change_increase":
+        "https://explorer-studio.genlayer.com/tx/0x5cb5e18136bbae1f71012645ae40bd237f67d917c7223047bfc0432ccfd2dd9c",
+    "T5_apply_reputation_change_double":
+        "https://explorer-studio.genlayer.com/tx/0x1cc293005fdc1971ed83222870b3ca23ac0aad7497cb0f2eb252d17bd765661e",
 }
 
 
