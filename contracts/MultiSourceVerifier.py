@@ -16,6 +16,35 @@ def _is_valid_url(url: str) -> bool:
     return bool(pattern.match(url.strip()))
 
 
+def _evaluate_one_source(url: str, claim: str) -> bool:
+    """Fetch one URL and ask the LLM whether it corroborates the claim."""
+    try:
+        content = gl.nondet.web.render(url)
+    except:
+        return False
+
+    prompt = f"""
+    Claim: {claim}
+
+    Content from source ({url}):
+    {content[:2000]}
+
+    Does this content CORROBORATE the claim?
+    Respond with ONLY: YES or NO
+    """
+    response = gl.nondet.exec_prompt(prompt)
+    return "YES" in response.upper()
+
+
+def _compute_status(verified_count: int, total: int) -> str:
+    if verified_count == total:
+        return "VERIFIED"
+    elif verified_count >= total // 2:
+        return "PARTIAL"
+    else:
+        return "REJECTED"
+
+
 @allow_storage
 @dataclass
 class VerificationRecord:
@@ -71,56 +100,87 @@ class MultiSourceVerifier(gl.Contract):
         ev = self.verifications[evidence_id]
         assert ev.status == "PENDING", "Already verified"
 
-        source_list = ev.sources.split(',')
+        source_list = [s.strip() for s in ev.sources.split(',')]
+        assert len(source_list) >= 2, "At least 2 sources required"
+        assert len(source_list) == int(ev.total_sources), "Source count mismatch"
+
         claim = ev.claim
 
+        # ---------------- LEADER ----------------
         def leader_fn():
             verified_urls = []
             for src in source_list:
-                src = src.strip()
-                try:
-                    content = gl.nondet.web.render(src)
-                except:
-                    continue
-
-                prompt = f"""
-                Claim: {claim}
-                Content from source ({src}):
-                {content[:2000]}
-                Does this content CORROBORATE the claim?
-                Respond with ONLY: YES or NO
-                """
-                response = gl.nondet.exec_prompt(prompt)
-                if "YES" in response.upper():
+                if _evaluate_one_source(src, claim):
                     verified_urls.append(src)
 
             verified_count = len(verified_urls)
             total = len(source_list)
-
-            if verified_count == total:
-                status = "VERIFIED"
-            elif verified_count >= total // 2:
-                status = "PARTIAL"
-            else:
-                status = "REJECTED"
+            status = _compute_status(verified_count, total)
 
             return {
                 "verified_count": verified_count,
                 "total": total,
                 "status": status,
-                "verified_urls": ",".join(verified_urls),
+                "verified_urls": ",".join(sorted(verified_urls)),
             }
 
+        # ---------------- VALIDATOR ----------------
         def validator_fn(leader_result):
             if not isinstance(leader_result, gl.vm.Return):
                 return False
-            leader_data = leader_result.calldata
-            leader_status = leader_data.get("status")
-            return leader_status in ("VERIFIED", "PARTIAL", "REJECTED")
 
+            leader_data = leader_result.calldata
+
+            # Stage 1: Shape validation
+            leader_count = leader_data.get("verified_count")
+            leader_total = leader_data.get("total")
+            leader_status = leader_data.get("status")
+            leader_urls_str = leader_data.get("verified_urls", "")
+
+            if not isinstance(leader_count, int):
+                return False
+            if not isinstance(leader_total, int):
+                return False
+            if leader_total != len(source_list):
+                return False
+            if leader_status not in ("VERIFIED", "PARTIAL", "REJECTED"):
+                return False
+            if leader_count < 0 or leader_count > leader_total:
+                return False
+
+            # Stage 2: Independent recomputation
+            validator_urls = []
+            for src in source_list:
+                if _evaluate_one_source(src, claim):
+                    validator_urls.append(src)
+
+            validator_count = len(validator_urls)
+            validator_status = _compute_status(validator_count, len(source_list))
+
+            # Stage 3: Invariant check on leader output
+            expected_status = _compute_status(leader_count, leader_total)
+            if expected_status != leader_status:
+                return False
+
+            # Stage 4: Compare recomputed scalars
+            if validator_count != leader_count:
+                return False
+            if validator_status != leader_status:
+                return False
+
+            # Stage 5: Compare verified_urls as sets
+            leader_set = set(u for u in leader_urls_str.split(',') if u)
+            validator_set = set(validator_urls)
+            if leader_set != validator_set:
+                return False
+
+            return True
+
+        # ---------------- RUN ----------------
         result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
 
         ev.verified_count = u256(result["verified_count"])
+        ev.total_sources = u256(result["total"])
         ev.status = result["status"]
         ev.verified_urls = result["verified_urls"]
         self.verifications[evidence_id] = ev
@@ -151,7 +211,6 @@ class MultiSourceVerifier(gl.Contract):
 
     @gl.public.view
     def get_verification_data(self, evidence_id: u256) -> str:
-        """Returns raw verification data for downstream contracts."""
         if evidence_id not in self.verifications:
             return "NOT_FOUND"
         ev = self.verifications[evidence_id]
