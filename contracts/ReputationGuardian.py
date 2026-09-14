@@ -22,7 +22,7 @@ class ReputationGuardian(gl.Contract):
     changes: TreeMap[u256, ReputationChange]
     next_id: u256
     reputation: TreeMap[str, u256]
-    applied_scores: TreeMap[u256, bool]  # NEW: track applied score_ids
+    applied_scores: TreeMap[u256, bool]
     scorer_contract: str
 
     def __init__(self, scorer_address: str):
@@ -31,11 +31,6 @@ class ReputationGuardian(gl.Contract):
 
     @gl.public.write
     def apply_reputation_change(self, score_id: u256) -> u256:
-        """Applies reputation change by reading score data from ConfidenceScorer on-chain.
-        Agent is read from the on-chain score record, NOT from caller input.
-        Each score_id can only be applied once."""
-
-        # NEW: prevent double-application
         assert score_id not in self.applied_scores, "Score already applied"
 
         scorer_data_raw = gl.get_contract_at(
@@ -70,8 +65,6 @@ class ReputationGuardian(gl.Contract):
             raise gl.vm.UserError("Change too small to apply")
 
         self.reputation[agent] = new_score
-
-        # NEW: mark score as applied
         self.applied_scores[score_id] = True
 
         cid = self.next_id
