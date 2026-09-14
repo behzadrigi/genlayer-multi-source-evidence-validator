@@ -7,8 +7,8 @@ This document describes the four intelligent contracts in the GenLayer Multi-Sou
 | Contract | Purpose | Consensus Pattern |
 | :--- | :--- | :--- |
 | SourceNormalizer | Normalizes and validates evidence source URLs | Deterministic |
-| MultiSourceVerifier | Verifies evidence from multiple sources using real consensus | Custom leader/validator with gl.nondet.web.render and gl.vm.run_nondet_unsafe |
-| ConfidenceScorer | Calculates confidence score, reads on-chain from MultiSourceVerifier | Deterministic |
+| MultiSourceVerifier | Verifies evidence from multiple sources with independent validator recomputation | Custom leader/validator with gl.nondet.web.render and gl.vm.run_nondet_unsafe |
+| ConfidenceScorer | Calculates confidence score, reads on-chain from MultiSourceVerifier, prevents double-scoring | Deterministic |
 | ReputationGuardian | Manages reputation changes, reads on-chain from ConfidenceScorer, prevents double-application | Deterministic |
 
 ---
@@ -56,7 +56,7 @@ class NormalizedSource:
 ## 2. MultiSourceVerifier
 
 ### Purpose
-Fetches and verifies evidence from multiple independent sources using real web content and consensus.
+Fetches and verifies evidence from multiple independent sources using real web content and a validator that independently recomputes every consequential field.
 
 ### State Variables
 - `verifications: TreeMap[u256, VerificationRecord]` - stores verification records
@@ -79,7 +79,7 @@ class VerificationRecord:
 
 ### Write Methods
 - `submit_evidence(agent: str, claim: str, sources: str) -> u256` - registers a new evidence claim
-- `verify_sources(evidence_id: u256) -> bool` - runs consensus verification using gl.nondet.web.render
+- `verify_sources(evidence_id: u256) -> bool` - runs consensus verification with independent validator recomputation
 
 ### Read Methods
 - `get_verification_status(evidence_id: u256) -> str`
@@ -88,14 +88,35 @@ class VerificationRecord:
 - `list_verifications() -> str`
 - `get_agent_verifications(agent: str) -> str`
 
-### Consensus Pattern
-- Uses gl.nondet.web.render to fetch each source URL
-- Uses LLM to check if content corroborates the claim
-- Uses gl.vm.run_nondet_unsafe for leader/validator consensus
-- Status: VERIFIED (all sources), PARTIAL (at least half), REJECTED (less than half)
+### Consensus Pattern (v3)
+
+The validator does not trust the leader's status label. It performs five independent checks:
+
+1. Shape validation:
+   - leader_count must be int
+   - leader_total must be int and must equal len(source_list)
+   - leader_status must be in ("VERIFIED", "PARTIAL", "REJECTED")
+   - leader_count must be in [0, leader_total]
+2. Independent recomputation:
+   - For each source in source_list, validator calls `_evaluate_one_source()`
+   - validator_count = len(validator_urls)
+   - validator_status = `_compute_status(validator_count, len(source_list))`
+3. Invariant check on leader output:
+   - expected_status = `_compute_status(leader_count, leader_total)`
+   - if expected_status != leader_status: return False
+4. Scalar comparison:
+   - if validator_count != leader_count: return False
+   - if validator_status != leader_status: return False
+5. Set comparison:
+   - leader_set = set of leader_urls_str split by comma
+   - validator_set = set of validator_urls
+   - if leader_set != validator_set: return False
+
+All five checks must pass for the result to be accepted.
 
 ### Rules
-- At least 2 sources required
+- At least 2 sources required (checked at submit time and again at verify time)
+- Source count must match the stored total_sources
 - All sources must be valid URLs
 - If fetch fails, source is treated as not corroborated (no error)
 
@@ -104,7 +125,7 @@ class VerificationRecord:
 ## 3. ConfidenceScorer
 
 ### Purpose
-Calculates a final confidence score based on verification results, read on-chain from MultiSourceVerifier.
+Calculates a final confidence score based on verification results, read on-chain from MultiSourceVerifier. Prevents scoring the same verification twice.
 
 ### Constructor
 ```python
@@ -115,6 +136,7 @@ def __init__(self, verifier_address: str):
 
 ### State Variables
 - `scores: TreeMap[u256, ConfidenceRecord]` - stores confidence records
+- `scored_verifications: TreeMap[u256, bool]` - tracks verification IDs that have been scored
 - `next_id: u256` - counter for score IDs
 - `verifier_contract: str` - address of MultiSourceVerifier contract
 
@@ -140,6 +162,7 @@ class ConfidenceRecord:
 - `get_score(evidence_id: u256) -> str`
 - `get_score_details(evidence_id: u256) -> str`
 - `get_score_data(evidence_id: u256) -> str` - raw data for downstream contracts
+- `is_verification_scored(verification_id: u256) -> str`
 - `list_scores() -> str`
 
 ### Scoring Formula
@@ -154,13 +177,14 @@ status = APPROVED if final_score >= 50 else REJECTED
 - Does NOT trust caller-supplied JSON
 - Reads verification data directly from MultiSourceVerifier on-chain using gl.get_contract_at()
 - Reads agent from the on-chain verification record, not from caller
+- Prevents scoring the same verification twice via scored_verifications map
 
 ---
 
 ## 4. ReputationGuardian
 
 ### Purpose
-Manages reputation changes based on approved confidence scores, read on-chain from ConfidenceScorer.
+Manages reputation changes based on approved confidence scores, read on-chain from ConfidenceScorer. Prevents applying the same score twice.
 
 ### Constructor
 ```python
@@ -173,7 +197,7 @@ def __init__(self, scorer_address: str):
 - `changes: TreeMap[u256, ReputationChange]` - stores reputation changes
 - `next_id: u256` - counter for change IDs
 - `reputation: TreeMap[str, u256]` - agent reputation scores
-- `applied_scores: TreeMap[u256, bool]` - tracks applied score IDs
+- `applied_scores: TreeMap[u256, bool]` - tracks score IDs that have been applied
 - `scorer_contract: str` - address of ConfidenceScorer contract
 
 ### Storage Structure
@@ -218,7 +242,7 @@ class ReputationChange:
 
 ## Contract Chaining
 
-The v4 architecture uses on-chain chaining:
+The v5 architecture uses on-chain chaining:
 
 ```
 SourceNormalizer -> MultiSourceVerifier -> ConfidenceScorer -> ReputationGuardian
@@ -229,4 +253,4 @@ SourceNormalizer -> MultiSourceVerifier -> ConfidenceScorer -> ReputationGuardia
 - Each downstream contract reads from upstream using gl.get_contract_at(Address(...)).view().get_..._data()
 - The agent is propagated from the verification record through the entire chain
 
-This prevents fabrication of approved scores, agent spoofing, and double-application.
+This prevents fabrication of approved scores, agent spoofing, double scoring, and double application.
