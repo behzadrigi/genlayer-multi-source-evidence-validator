@@ -1,3 +1,5 @@
+# DECISIONS.md
+
 # Design Decisions
 
 This document explains the architectural and design decisions behind the GenLayer Multi-Source Evidence Validator Suite.
@@ -37,11 +39,9 @@ Using an LLM to calculate the final confidence score would add cost, latency, an
 
 ### Solution
 The ConfidenceScorer uses a simple, deterministic formula:
-```
 base_score = (verified_count / total_sources) * 100
 multiplier = VERIFIED: 1.0, PARTIAL: 0.7, REJECTED: 0.3
 final_score = base_score * multiplier
-```
 
 ### Trade-off
 - The formula is less flexible than an LLM.
@@ -56,7 +56,6 @@ In v1, downstream contracts (ConfidenceScorer, ReputationGuardian) trusted calle
 
 ### Solution
 Each downstream contract now reads its input directly from the upstream contract on-chain:
-
 - ConfidenceScorer stores the MultiSourceVerifier address and calls get_verification_data() on-chain.
 - ReputationGuardian stores the ConfidenceScorer address and calls get_score_data() on-chain.
 
@@ -78,7 +77,6 @@ In v2, apply_reputation_change() still accepted agent as a parameter from caller
 
 ### Solution
 The agent is now read from the on-chain verification record and propagated through the chain:
-
 - MultiSourceVerifier stores agent in VerificationRecord.
 - ConfidenceScorer reads agent from get_verification_data() and stores it in ConfidenceRecord.
 - ReputationGuardian reads agent from get_score_data() and never accepts it from caller.
@@ -101,12 +99,8 @@ In v3, if someone called apply_reputation_change(score_id=1) twice, the reputati
 
 ### Solution
 Added an applied_scores map that tracks which score_ids have already been applied:
-
-```python
 assert score_id not in self.applied_scores, "Score already applied"
-# ... apply change ...
 self.applied_scores[score_id] = True
-```
 
 ### Why This Matters
 1. Double-application attack is now prevented.
@@ -119,13 +113,62 @@ self.applied_scores[score_id] = True
 
 ---
 
-## 7. Why Include Verified URLs in Storage?
+## 7. Why Independent Validator Recomputation (v5)?
 
 ### Problem
-Downstream contracts need to know not just how many sources were verified, but which specific sources were verified.
+In v2-v4, the validator only checked whether the leader's status was an allowed label (VERIFIED, PARTIAL, REJECTED). It did not independently recompute verified_count, total, or verified_urls. A malicious or faulty leader could return any value for these fields, and as long as status was one of the three allowed labels, validators would accept it. This broke the chain of trust because ConfidenceScorer and ReputationGuardian depend on these fields.
 
 ### Solution
-The VerificationRecord stores a verified_urls field as a comma-separated string.
+The validator now performs five independent checks:
+1. Shape validation: types, bounds, and total consistency.
+2. Independent recomputation: fetch every source and recompute verified_count and status.
+3. Invariant check: status must equal compute_status(count, total).
+4. Scalar comparison: validator_count == leader_count and validator_status == leader_status.
+5. Set comparison: the set of verified URLs must match exactly.
+
+All five checks must pass for the result to be accepted.
+
+### Why This Matters
+1. Leader cannot lie about status: invariant is checked.
+2. Leader cannot lie about verified_count: scalars are compared.
+3. Leader cannot lie about which URLs were verified: sets are compared.
+4. Leader cannot lie about total: total consistency is enforced.
+5. Every consequential field is bound to an independent recomputation.
+
+### Trade-off
+- Each validator fetches every source independently, which increases cost and time.
+- But this is exactly the real cost of genuine consensus, not a design flaw.
+
+---
+
+## 8. Why Prevent Double-Scoring in ConfidenceScorer (v5)?
+
+### Problem
+In v4, if calculate_score(verification_id) was called twice for the same verification, two score records would be created, and potentially applied twice downstream.
+
+### Solution
+Added a scored_verifications map that tracks which verification_ids have already been scored:
+assert verification_id not in self.scored_verifications, "Verification already scored"
+self.scored_verifications[verification_id] = True
+
+### Why This Matters
+1. Each verification can only produce one score.
+2. Downstream scoring is deterministic per verification.
+3. The overall system is idempotent with respect to verification_id.
+
+### Trade-off
+- One extra storage map.
+- But the protection ensures consistency.
+
+---
+
+## 9. Why Include Verified URLs in Storage?
+
+### Problem
+Downstream contracts and the validator need to know not just how many sources were verified, but which specific sources were verified.
+
+### Solution
+The VerificationRecord stores a verified_urls field as a comma-separated string, and the validator compares it as a set.
 
 ### Trade-off
 - Storing URLs increases storage usage slightly.
@@ -133,7 +176,7 @@ The VerificationRecord stores a verified_urls field as a comma-separated string.
 
 ---
 
-## 8. Why Two Separate Downstream Contracts?
+## 10. Why Two Separate Downstream Contracts?
 
 ### Problem
 Why not combine ConfidenceScorer and ReputationGuardian into a single contract?
@@ -150,7 +193,7 @@ Separating them provides:
 
 ---
 
-## 9. Why Use gl.vm.run_nondet_unsafe Instead of Simple LLM Calls?
+## 11. Why Use gl.vm.run_nondet_unsafe Instead of Simple LLM Calls?
 
 ### Problem
 A single LLM call could be manipulated or produce inconsistent results.
@@ -158,7 +201,7 @@ A single LLM call could be manipulated or produce inconsistent results.
 ### Solution
 The MultiSourceVerifier uses gl.vm.run_nondet_unsafe with a leader/validator pattern:
 - The leader fetches content and asks the LLM to check corroboration.
-- Independent validators verify the leader's result.
+- Independent validators recompute every consequential field.
 - Consensus is required for the result to be accepted.
 
 ### Trade-off
@@ -167,7 +210,7 @@ The MultiSourceVerifier uses gl.vm.run_nondet_unsafe with a leader/validator pat
 
 ---
 
-## 10. Why Expose get_..._data View Methods?
+## 12. Why Expose get_..._data View Methods?
 
 ### Problem
 Downstream contracts need to read structured data from upstream contracts without parsing complex JSON.
@@ -195,6 +238,8 @@ These methods return a clean, minimal JSON payload specifically designed for dow
 | Contract chaining (v2) | Prevents fabrication of scores |
 | Agent binding (v3) | Prevents agent spoofing |
 | Double-application prevention (v4) | Each score applies only once |
+| Independent validator recomputation (v5) | Prevents leader manipulation |
+| Double-scoring prevention (v5) | Each verification produces one score |
 | Store verified URLs | Full transparency and traceability |
 | Separate downstream contracts | Modular, testable, upgradable |
 | Use gl.vm.run_nondet_unsafe | Real independent verification |
