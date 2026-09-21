@@ -16,6 +16,27 @@ def _is_valid_url(url: str) -> bool:
     return bool(pattern.match(url.strip()))
 
 
+def _clean_url(url: str):
+    if not url:
+        return None
+    cleaned = url.strip().rstrip('/')
+    if cleaned.startswith('http://'):
+        cleaned = cleaned.replace('http://', 'https://', 1)
+    cleaned = cleaned.replace(' ', '')
+    if '?' in cleaned:
+        cleaned = cleaned.split('?')[0]
+    return cleaned if cleaned else None
+
+
+def _extract_domain(url: str):
+    try:
+        without_protocol = re.sub(r'^https?://', '', url)
+        domain = without_protocol.split('/')[0]
+        return re.sub(r'^www\.', '', domain)
+    except Exception:
+        return None
+
+
 def _evaluate_one_source(url: str, claim: str) -> bool:
     """Fetch one URL and ask the LLM whether it corroborates the claim."""
     try:
@@ -66,17 +87,32 @@ class MultiSourceVerifier(gl.Contract):
         self.next_id = u256(0)
 
     @gl.public.write
-    def submit_evidence(self, agent: str, claim: str, sources: str) -> u256:
-        assert agent.strip() != "", "Agent cannot be empty"
+    def submit_evidence(self, claim: str, sources: str) -> u256:
+        # Agent is derived from the real transaction sender, not from caller input
+        agent = str(gl.message.sender_address)
+
         assert claim.strip() != "", "Claim cannot be empty"
         assert sources.strip() != "", "Sources cannot be empty"
 
-        source_list = sources.split(',')
-        assert len(source_list) >= 2, "At least 2 sources required"
+        raw_list = sources.split(',')
+        assert len(raw_list) >= 2, "At least 2 sources required"
 
-        for src in source_list:
-            src = src.strip()
-            assert _is_valid_url(src), f"Invalid URL: {src}"
+        normalized_list = []
+        domain_list = []
+        for src in raw_list:
+            cleaned = _clean_url(src)
+            assert cleaned is not None, f"Invalid URL: {src}"
+            assert _is_valid_url(cleaned), f"Invalid URL: {cleaned}"
+            domain = _extract_domain(cleaned)
+            assert domain is not None, f"Could not extract domain from: {cleaned}"
+            normalized_list.append(cleaned)
+            domain_list.append(domain)
+
+        # Enforce uniqueness of URLs
+        assert len(set(normalized_list)) == len(normalized_list), "Duplicate source URL"
+
+        # Enforce uniqueness of domains (source independence)
+        assert len(set(domain_list)) == len(domain_list), "Sources must come from independent domains"
 
         eid = self.next_id
         self.next_id += u256(1)
@@ -85,9 +121,9 @@ class MultiSourceVerifier(gl.Contract):
             evidence_id=eid,
             agent=agent,
             claim=claim,
-            sources=sources,
+            sources=",".join(normalized_list),
             verified_count=u256(0),
-            total_sources=u256(len(source_list)),
+            total_sources=u256(len(normalized_list)),
             status="PENDING",
             verified_urls="",
         )
