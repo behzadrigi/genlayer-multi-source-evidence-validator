@@ -29,6 +29,11 @@ class ReputationGuardian(gl.Contract):
         self.next_id = u256(0)
         self.scorer_contract = scorer_address
 
+    # NOTE: initialize_reputation was removed.
+    # self.reputation.get(agent, u256(50)) in apply_reputation_change
+    # provides a lazy default of 50 on first encounter with an agent.
+    # This removes the attack surface where anyone could claim an agent first.
+
     @gl.public.write
     def apply_reputation_change(self, score_id: u256) -> u256:
         assert score_id not in self.applied_scores, "Score already applied"
@@ -51,6 +56,7 @@ class ReputationGuardian(gl.Contract):
         assert agent != "", "Agent not found in score record"
         assert status == "APPROVED", "Score not approved"
 
+        # Lazy default of 50 on first encounter
         current_reputation = self.reputation.get(agent, u256(50))
         new_score = u256(final_score)
 
@@ -81,12 +87,6 @@ class ReputationGuardian(gl.Contract):
         )
 
         return cid
-
-    @gl.public.write
-    def initialize_reputation(self, agent: str, initial_score: u256):
-        assert initial_score >= 0 and initial_score <= 100, "Score must be 0-100"
-        if agent not in self.reputation:
-            self.reputation[agent] = initial_score
 
     @gl.public.view
     def get_reputation(self, agent: str) -> str:
