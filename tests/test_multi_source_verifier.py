@@ -1,127 +1,140 @@
 """
 # test_multi_source_verifier.py
 
-Test suite for MultiSourceVerifier contract (v3).
+Test suite for MultiSourceVerifier contract (v4).
 
 Run these tests manually in GenLayer Studio by calling the functions
 with the given inputs and comparing the outputs.
 """
 
 # ============================================================================
-# TEST T1: Submit evidence with 2 sources
+# TEST T1: Submit evidence (no agent parameter)
 # ============================================================================
 
 def test_submit_evidence():
     """
     Input:
-      agent: "0xTestAgent"
       claim: "Python is a programming language"
       sources: "https://www.python.org,https://www.w3schools.com/python/"
     Expected:
-      - Returns evidence_id = 1
-    Tx: 0x122dd0277d52deab87dff26c7338ee536667295bae3899a09818dfe76fdee2f5
+      - Returns evidence_id = 0
+      - agent is derived from gl.message.sender_address
+    Tx: 0x077a106c7dcc2e298f0008b855231bfba38965bba2fa7beae1b2f82b21b65937
     """
     pass
 
 
 # ============================================================================
-# TEST T2: Verify sources with independent validator recomputation
-# ============================================================================
-
-def test_verify_sources():
-    """
-    Input: evidence_id = 1
-    Expected:
-      - Returns true
-      - Consensus: {"status": "VERIFIED", "total": 2, "verified_count": 2,
-                    "verified_urls": "https://www.python.org,https://www.w3schools.com/python/"}
-    Tx: 0xbc7a01826d30aade0aa559c4e4877e47143d918d237ddff0314a335e8af59be0
-
-    Note: The validator in v3 independently:
-      1. Fetches every source.
-      2. Recomputes verified_count and status.
-      3. Checks the invariant status == compute_status(count, total).
-      4. Compares count and status against the leader.
-      5. Compares the verified URL set against the leader.
-    """
-    pass
-
-
-# ============================================================================
-# TEST T3: Get verification status
-# ============================================================================
-
-def test_get_verification_status():
-    """
-    Input: evidence_id = 1
-    Expected: "VERIFIED:2/2"
-    """
-    pass
-
-
-# ============================================================================
-# TEST T4: Get verification details
+# TEST T2: Get verification details (verify agent)
 # ============================================================================
 
 def test_get_verification_details():
     """
-    Input: evidence_id = 1
+    Input: evidence_id = 0
     Expected JSON:
       {
-        "id": 1,
-        "agent": "0xTestAgent",
+        "id": 0,
+        "agent": "0x69d353B9178e357Ce28FD1678486A7BcCf2d65C8",
         "claim": "Python is a programming language",
-        "sources": "https://www.python.org,https://www.w3schools.com/python/",
-        "verified_count": 2,
+        "sources": "https://www.python.org,https://www.w3schools.com/python",
+        "verified_count": 0,
         "total_sources": 2,
-        "status": "VERIFIED"
+        "status": "PENDING"
       }
+    Note: agent is the real transaction sender, not a caller-supplied string.
     """
     pass
 
 
 # ============================================================================
-# TEST T5: Get verification data (for downstream contracts)
+# TEST T3: Duplicate source URL rejection
 # ============================================================================
 
-def test_get_verification_data():
+def test_duplicate_url_rejection():
+    """
+    Input:
+      claim: "Test claim"
+      sources: "https://www.python.org,https://www.python.org"
+    Expected:
+      - Result: ERROR
+      - Error: "Duplicate source URL"
+    Tx: 0x718acc1dcf8c219a4879d1a4d37bf6acbdbd66cf2c7bc4f6a25147793bdd0680
+    """
+    pass
+
+
+# ============================================================================
+# TEST T4: Duplicate domain rejection
+# ============================================================================
+
+def test_duplicate_domain_rejection():
+    """
+    Input:
+      claim: "Test claim"
+      sources: "https://www.python.org/about,https://www.python.org/downloads"
+    Expected:
+      - Result: ERROR
+      - Error: "Sources must come from independent domains"
+    Tx: 0x1c2306cfbbd44f1b3658d1a0d8c9ff86cf632a9aa4a61a735edac452a3ab9a59
+    """
+    pass
+
+
+# ============================================================================
+# TEST T5: Verify sources with independent validator recomputation
+# ============================================================================
+
+def test_verify_sources_verified():
+    """
+    Input: evidence_id = 0
+    Expected:
+      - Returns true
+      - Consensus: {"status": "VERIFIED", "total": 2, "verified_count": 2,
+                    "verified_urls": "https://www.python.org,https://www.w3schools.com/python"}
+    Tx: 0xd8c7f5251bcf39b1d8477aa7e694444506b89bdd655d8752a523f8cba72c68d2
+    """
+    pass
+
+
+# ============================================================================
+# TEST T6: Submit pending evidence (for PENDING consumption test)
+# ============================================================================
+
+def test_submit_pending_evidence():
+    """
+    Input:
+      claim: "Test pending claim"
+      sources: "https://www.example.org,https://www.wikipedia.org"
+    Expected:
+      - Returns evidence_id = 1 with status PENDING
+    Tx: 0x8dc721ab949a6267885bb71334e56ea674d2443b294f0623390807da639fce76
+    """
+    pass
+
+
+# ============================================================================
+# TEST T7: Verify pending evidence (returns REJECTED)
+# ============================================================================
+
+def test_verify_sources_rejected():
     """
     Input: evidence_id = 1
-    Expected JSON:
-      {
-        "id": 1,
-        "agent": "0xTestAgent",
-        "claim": "Python is a programming language",
-        "sources": "https://www.python.org,https://www.w3schools.com/python/",
-        "verified_count": 2,
-        "total_sources": 2,
-        "status": "VERIFIED",
-        "verified_urls": "https://www.python.org,https://www.w3schools.com/python/"
-      }
+    Expected:
+      - Returns true
+      - Consensus: {"status": "REJECTED", "total": 2, "verified_count": 0, "verified_urls": ""}
+    Tx: 0x4d2d9602fa032b055843b91b21bfd7ff5d6a21500c6932455b2bb6176168bc08
     """
     pass
 
 
 # ============================================================================
-# TEST T6: List all verifications
+# TEST T8: Get verification status
 # ============================================================================
 
-def test_list_verifications():
+def test_get_verification_status():
     """
-    Input: None
-    Expected: "0:REJECTED,1:VERIFIED"
-    """
-    pass
-
-
-# ============================================================================
-# TEST T7: Get verifications by agent
-# ============================================================================
-
-def test_get_agent_verifications():
-    """
-    Input: agent = "0xTestAgent"
-    Expected: "0,1"
+    Input: evidence_id = 0
+    Expected: "VERIFIED:2/2"
     """
     pass
 
@@ -130,9 +143,9 @@ def test_get_agent_verifications():
 # DEPLOYED CONTRACT
 # ============================================================================
 
-DEPLOYED_ADDRESS = "0x8D9498DB50bEE3aCe284ecF438ea912F6a69846d"
-EXPLORER_LINK = "https://explorer-studio.genlayer.com/address/0x8D9498DB50bEE3aCe284ecF438ea912F6a69846d"
-DEPLOY_TX = "https://explorer-studio.genlayer.com/tx/0x890e3484c93f28c444b825b10e602ca16cb5d52418556e6994838261f696dace"
+DEPLOYED_ADDRESS = "0xFA4331084CE100F086bDCFcCe16028BFbd374BcF"
+EXPLORER_LINK = "https://explorer-studio.genlayer.com/address/0xFA4331084CE100F086bDCFcCe16028BFbd374BcF"
+DEPLOY_TX = "https://explorer-studio.genlayer.com/tx/0xd53785753a922cf5b28b2ba87457243ce63c0fc27bee9fa54867ad82400d29b0"
 
 
 # ============================================================================
@@ -141,9 +154,17 @@ DEPLOY_TX = "https://explorer-studio.genlayer.com/tx/0x890e3484c93f28c444b825b10
 
 TEST_LINKS = {
     "T1_submit_evidence":
-        "https://explorer-studio.genlayer.com/tx/0x122dd0277d52deab87dff26c7338ee536667295bae3899a09818dfe76fdee2f5",
-    "T2_verify_sources":
-        "https://explorer-studio.genlayer.com/tx/0xbc7a01826d30aade0aa559c4e4877e47143d918d237ddff0314a335e8af59be0",
+        "https://explorer-studio.genlayer.com/tx/0x077a106c7dcc2e298f0008b855231bfba38965bba2fa7beae1b2f82b21b65937",
+    "T3_duplicate_url":
+        "https://explorer-studio.genlayer.com/tx/0x718acc1dcf8c219a4879d1a4d37bf6acbdbd66cf2c7bc4f6a25147793bdd0680",
+    "T4_duplicate_domain":
+        "https://explorer-studio.genlayer.com/tx/0x1c2306cfbbd44f1b3658d1a0d8c9ff86cf632a9aa4a61a735edac452a3ab9a59",
+    "T5_verify_verified":
+        "https://explorer-studio.genlayer.com/tx/0xd8c7f5251bcf39b1d8477aa7e694444506b89bdd655d8752a523f8cba72c68d2",
+    "T6_submit_pending":
+        "https://explorer-studio.genlayer.com/tx/0x8dc721ab949a6267885bb71334e56ea674d2443b294f0623390807da639fce76",
+    "T7_verify_rejected":
+        "https://explorer-studio.genlayer.com/tx/0x4d2d9602fa032b055843b91b21bfd7ff5d6a21500c6932455b2bb6176168bc08",
 }
 
 
@@ -152,12 +173,12 @@ TEST_LINKS = {
 # ============================================================================
 
 NOTES = """
-- At least 2 sources are required for each evidence claim.
-- The verifier uses gl.nondet.web.render to fetch real content from each URL.
-- The verifier uses gl.vm.run_nondet_unsafe for leader/validator consensus.
+- submit_evidence has no agent parameter. The agent is derived from
+  gl.message.sender_address, so no caller can submit on behalf of another agent.
+- URLs are normalized and enforced to be unique both by URL and by domain.
+- At least 2 independent sources are required.
+- The validator independently recomputes verified_count, total, status, and
+  verified_urls, and checks the invariant status == compute_status(count, total).
 - If a source cannot be fetched, it is treated as not corroborated (no error).
-- The validator independently recomputes every consequential field:
-  verified_count, total, status, and verified_urls.
-- The agent field is stored here and propagated through the entire chain.
-- get_verification_data is designed for downstream contracts to read on-chain.
+- The agent field is stored in VerificationRecord and propagated through the chain.
 """
