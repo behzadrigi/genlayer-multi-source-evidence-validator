@@ -1,161 +1,141 @@
 """
-# test_confidence_scorer.py
+# test_reputation_guardian.py
 
-Test suite for ConfidenceScorer contract (v5).
+Test suite for ReputationGuardian contract (v6).
 
 Run these tests manually in GenLayer Studio by calling the functions
 with the given inputs and comparing the outputs.
 """
 
 # ============================================================================
-# TEST T1: Calculate score on PENDING (should revert)
+# TEST T1: Get reputation for a fresh agent (lazy default of 50)
 # ============================================================================
 
-def test_calculate_score_on_pending():
+def test_get_reputation_fresh_agent():
     """
-    Input: verification_id = 1 (PENDING)
+    Input: agent = "0x69d353B9178e357Ce28FD1678486A7BcCf2d65C8"
+    Expected: "REPUTATION:50"
+
+    Note: initialize_reputation was removed. The lazy default of 50 is
+    provided by self.reputation.get(agent, u256(50)).
+    """
+    pass
+
+
+# ============================================================================
+# TEST T2: Apply reputation change (INCREASE path, agent from on-chain)
+# ============================================================================
+
+def test_apply_reputation_change_increase():
+    """
+    Input: score_id = 1
+    Expected:
+      - Returns change_id = 0
+    Tx: 0x018599cc7cf824e4a304b23fe26b193aa1ed30c0e97563b97f25e78479cd1edd
+
+    Note: No agent parameter. The agent is read from the on-chain score record.
+    """
+    pass
+
+
+# ============================================================================
+# TEST T3: Get reputation after change
+# ============================================================================
+
+def test_get_reputation_after_change():
+    """
+    Input: agent = "0x69d353B9178e357Ce28FD1678486A7BcCf2d65C8"
+    Expected: "REPUTATION:100"
+
+    Explanation:
+      - Lazy default was 50
+      - Approved score of 100 was applied
+      - INCREASE triggered since 100 > 50 + 10
+      - New reputation is 100
+    """
+    pass
+
+
+# ============================================================================
+# TEST T4: Apply same score_id again (should be blocked)
+# ============================================================================
+
+def test_apply_reputation_change_double():
+    """
+    Input: score_id = 1 (same as T2)
     Expected:
       - Result: ERROR
-      - Error: "Evidence has not been verified yet"
-    Tx: 0xfc34cb7f291ccb42d18f86ddd5e9ddbc2a06259d8a975fb5addb5ee484a9dd83
-
-    Note: This test proves that PENDING records are not permanently consumed.
+      - Error: "Score already applied"
+    Tx: 0xd08a21b8cd0676a261a82a30de6ca830031cdafec2f5d39266b1357c42a85a9d
     """
     pass
 
 
 # ============================================================================
-# TEST T2: Calculate score on REJECTED verification
+# TEST T5: Check if score is applied
 # ============================================================================
 
-def test_calculate_score_rejected():
+def test_is_score_applied():
     """
-    Input: verification_id = 1 (now REJECTED after verify_sources)
-    Expected:
-      - Returns score_id = 0
-    Tx: 0x19eeff89ef2f702534362a0872613c57c41230119461615a72cea3be9e3b5e84
-
-    Note: This test proves that the PENDING attempt above did not consume the record.
+    Input: score_id = 1
+    Expected: "APPLIED"
     """
     pass
 
 
 # ============================================================================
-# TEST T3: Get score for REJECTED verification
+# TEST T6: Get change status
 # ============================================================================
 
-def test_get_score_rejected():
+def test_get_change_status():
     """
-    Input: evidence_id = 0
-    Expected: "REJECTED:0"
-    """
-    pass
-
-
-# ============================================================================
-# TEST T4: Calculate score on VERIFIED verification
-# ============================================================================
-
-def test_calculate_score_verified():
-    """
-    Input: verification_id = 0 (VERIFIED)
-    Expected:
-      - Returns score_id = 1
-    Tx: 0xbddee6e180fb156ffddec89b2e4fb8313207d760842713d6f25ade92a743459f
+    Input: change_id = 0
+    Expected: "INCREASE:APPLIED"
     """
     pass
 
 
 # ============================================================================
-# TEST T5: Get score for VERIFIED verification
+# TEST T7: Get change details
 # ============================================================================
 
-def test_get_score_verified():
+def test_get_change_details():
     """
-    Input: evidence_id = 1
-    Expected: "APPROVED:100"
-    """
-    pass
-
-
-# ============================================================================
-# TEST T6: Get score details (agent read from on-chain)
-# ============================================================================
-
-def test_get_score_details():
-    """
-    Input: evidence_id = 1
+    Input: change_id = 0
     Expected JSON:
       {
-        "id": 1,
-        "verification_id": 0,
+        "id": 0,
         "agent": "0x69d353B9178e357Ce28FD1678486A7BcCf2d65C8",
-        "trust_score": 100,
-        "source_count": 2,
+        "score_id": 1,
         "final_score": 100,
-        "status": "APPROVED",
-        "verifier_address": "0xFA4331084CE100F086bDCFcCe16028BFbd374BcF"
+        "change_type": "INCREASE",
+        "status": "APPLIED",
+        "scorer_address": "0x9a9F31f2f36778cF99aB31c97AB3ace362Cf8A06"
       }
     """
     pass
 
 
 # ============================================================================
-# TEST T7: Double scoring blocked
+# TEST T8: List all changes
 # ============================================================================
 
-def test_double_scoring_blocked():
-    """
-    Input: verification_id = 0 (already scored)
-    Expected:
-      - Result: ERROR
-      - Error: "Verification already scored"
-    Tx: 0x23ffa0233e89793126b1858108716e2d067749e3703ad22542efed44560197a6
-    """
-    pass
-
-
-# ============================================================================
-# TEST T8: Check if verification is scored
-# ============================================================================
-
-def test_is_verification_scored():
-    """
-    Input: verification_id = 0
-    Expected: "SCORED"
-    """
-    pass
-
-
-# ============================================================================
-# TEST T9: Get score data (for downstream contract)
-# ============================================================================
-
-def test_get_score_data():
-    """
-    Input: evidence_id = 1
-    Expected JSON:
-      {
-        "id": 1,
-        "verification_id": 0,
-        "agent": "0x69d353B9178e357Ce28FD1678486A7BcCf2d65C8",
-        "trust_score": 100,
-        "source_count": 2,
-        "final_score": 100,
-        "status": "APPROVED"
-      }
-    """
-    pass
-
-
-# ============================================================================
-# TEST T10: List all scores
-# ============================================================================
-
-def test_list_scores():
+def test_list_changes():
     """
     Input: None
-    Expected: "0:REJECTED,1:APPROVED"
+    Expected: "0:INCREASE:APPLIED"
+    """
+    pass
+
+
+# ============================================================================
+# TEST T9: Get agent changes
+# ============================================================================
+
+def test_get_agent_changes():
+    """
+    Input: agent = "0x69d353B9178e357Ce28FD1678486A7BcCf2d65C8"
+    Expected: "0"
     """
     pass
 
@@ -164,11 +144,11 @@ def test_list_scores():
 # DEPLOYED CONTRACT
 # ============================================================================
 
-DEPLOYED_ADDRESS = "0x9a9F31f2f36778cF99aB31c97AB3ace362Cf8A06"
-EXPLORER_LINK = "https://explorer-studio.genlayer.com/address/0x9a9F31f2f36778cF99aB31c97AB3ace362Cf8A06"
-DEPLOY_TX = "https://explorer-studio.genlayer.com/tx/0x8d4cc5906d499a1fc21494cad176a501014e62dcb0e5624ebf38558b77a0230a"
+DEPLOYED_ADDRESS = "0x4555Ac4138D751DBF52Dd75B8da6FdA1Fdcc73FE"
+EXPLORER_LINK = "https://explorer-studio.genlayer.com/address/0x4555Ac4138D751DBF52Dd75B8da6FdA1Fdcc73FE"
+DEPLOY_TX = "https://explorer-studio.genlayer.com/tx/0x3524889d2d9e43dd359fe32a4044cc8d2d45caf3e5155de3a12c8ee10b9a9aa1"
 
-UPSTREAM_CONTRACT = "0xFA4331084CE100F086bDCFcCe16028BFbd374BcF"
+UPSTREAM_CONTRACT = "0x9a9F31f2f36778cF99aB31c97AB3ace362Cf8A06"
 
 
 # ============================================================================
@@ -176,31 +156,23 @@ UPSTREAM_CONTRACT = "0xFA4331084CE100F086bDCFcCe16028BFbd374BcF"
 # ============================================================================
 
 TEST_LINKS = {
-    "T1_calculate_on_pending":
-        "https://explorer-studio.genlayer.com/tx/0xfc34cb7f291ccb42d18f86ddd5e9ddbc2a06259d8a975fb5addb5ee484a9dd83",
-    "T2_calculate_rejected":
-        "https://explorer-studio.genlayer.com/tx/0x19eeff89ef2f702534362a0872613c57c41230119461615a72cea3be9e3b5e84",
-    "T4_calculate_verified":
-        "https://explorer-studio.genlayer.com/tx/0xbddee6e180fb156ffddec89b2e4fb8313207d760842713d6f25ade92a743459f",
-    "T7_double_scoring_blocked":
-        "https://explorer-studio.genlayer.com/tx/0x23ffa0233e89793126b1858108716e2d067749e3703ad22542efed44560197a6",
+    "T2_apply_reputation_change_increase":
+        "https://explorer-studio.genlayer.com/tx/0x018599cc7cf824e4a304b23fe26b193aa1ed30c0e97563b97f25e78479cd1edd",
+    "T4_apply_reputation_change_double":
+        "https://explorer-studio.genlayer.com/tx/0xd08a21b8cd0676a261a82a30de6ca830031cdafec2f5d39266b1357c42a85a9d",
 }
 
 
 # ============================================================================
-# SCORING FORMULA
+# CHANGE RULES
 # ============================================================================
 
-SCORING_FORMULA = """
-base_score = (verified_count / total_sources) * 100
-
-multiplier:
-  - VERIFIED: 1.0
-  - PARTIAL:  0.7
-  - REJECTED: 0.3
-
-final_score = int(base_score * multiplier)
-status = APPROVED if final_score >= 50 else REJECTED
+CHANGE_RULES = """
+- Only applies if score status is APPROVED.
+- INCREASE: new_score >= current_reputation + 10
+- DECREASE: new_score <= current_reputation - 10
+- NEUTRAL:  change too small, rejected with error
+- Each score_id can only be applied once.
 """
 
 
@@ -209,11 +181,13 @@ status = APPROVED if final_score >= 50 else REJECTED
 # ============================================================================
 
 NOTES = """
-- This contract does NOT accept verification JSON from the caller.
-- It reads verification directly from MultiSourceVerifier on-chain.
-- The agent is read from the on-chain verification record, never from caller.
-- calculate_score REVERTS on PENDING, so PENDING records are never consumed.
-- scored_verifications is written only on the successful path, as the last line.
-- This design proves that PENDING records can be re-scored after reaching a final
-  status, and that no verification can be scored twice.
+- This contract does NOT accept score JSON from the caller.
+- It reads score directly from ConfidenceScorer on-chain.
+- The agent is read from the on-chain score record, never from caller.
+- apply_reputation_change REVERTS if score_id was already applied.
+- initialize_reputation was removed in v6.
+- A lazy default of 50 is applied on first encounter with any agent via
+  self.reputation.get(agent, u256(50)).
+- This design prevents any caller from claiming an agent before its owner,
+  prevents agent spoofing, and prevents double-application of the same score.
 """
