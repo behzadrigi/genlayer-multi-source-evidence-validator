@@ -21,10 +21,10 @@ The MultiSourceVerifier requires at least 2 independent sources for each evidenc
 ## 2. Why URL Normalization?
 
 ### Problem
-Without normalization, the same URL could be written in many different ways (http://, https://, trailing slash, extra spaces), leading to inconsistent verification results.
+Without normalization, the same URL could be written in many different ways (http://, https://, trailing slash, extra spaces, query strings), leading to inconsistent verification results and trivial bypasses of uniqueness checks.
 
 ### Solution
-The SourceNormalizer cleans and normalizes all URLs before they reach the verification stage. It also blocks dangerous domains and rewards trusted ones with a higher trust score.
+The SourceNormalizer and the submit path in MultiSourceVerifier clean and normalize all URLs. HTTP is upgraded to HTTPS, trailing slashes and query strings are removed, and whitespace is stripped.
 
 ### Trade-off
 - Normalization adds an extra step.
@@ -49,13 +49,13 @@ final_score = base_score * multiplier
 
 ---
 
-## 4. Why Contract Chaining (v2)?
+## 4. Why Contract Chaining?
 
 ### Problem
 In v1, downstream contracts (ConfidenceScorer, ReputationGuardian) trusted caller-supplied JSON for verification and score data. This allowed anyone to fabricate an approved score and change an agent's reputation without a verified evidence record.
 
 ### Solution
-Each downstream contract now reads its input directly from the upstream contract on-chain:
+Each downstream contract reads its input directly from the upstream contract on-chain:
 - ConfidenceScorer stores the MultiSourceVerifier address and calls get_verification_data() on-chain.
 - ReputationGuardian stores the ConfidenceScorer address and calls get_score_data() on-chain.
 
@@ -70,29 +70,28 @@ Each downstream contract now reads its input directly from the upstream contract
 
 ---
 
-## 5. Why Bind Agent to On-Chain Record (v3)?
+## 5. Why Bind Agent to On-Chain Record?
 
 ### Problem
-In v2, apply_reputation_change() still accepted agent as a parameter from caller. This meant a caller could pair a legitimate APPROVED score_id (belonging to one agent) with an arbitrary agent, and change that agent's reputation based on evidence that was never about them.
+In v2, apply_reputation_change() still accepted agent as a parameter from caller. A caller could pair a legitimate APPROVED score_id (belonging to one agent) with an arbitrary agent, and change that agent's reputation based on evidence that was never about them.
 
 ### Solution
-The agent is now read from the on-chain verification record and propagated through the chain:
+The agent is read from the on-chain verification record and propagated through the chain:
 - MultiSourceVerifier stores agent in VerificationRecord.
 - ConfidenceScorer reads agent from get_verification_data() and stores it in ConfidenceRecord.
 - ReputationGuardian reads agent from get_score_data() and never accepts it from caller.
 
 ### Why This Matters
-1. Agent spoofing is now impossible.
+1. Agent spoofing downstream is now impossible.
 2. Every reputation change is tied to the correct agent automatically.
-3. The chain of trust is complete from evidence submission to reputation change.
 
 ### Trade-off
-- ConfidenceRecord now stores an extra field (agent).
+- ConfidenceRecord stores an extra field (agent).
 - But the security guarantee is essential.
 
 ---
 
-## 6. Why Prevent Double-Application (v4)?
+## 6. Why Prevent Double-Application?
 
 ### Problem
 In v3, if someone called apply_reputation_change(score_id=1) twice, the reputation would be increased twice for the same evidence.
@@ -103,9 +102,8 @@ assert score_id not in self.applied_scores, "Score already applied"
 self.applied_scores[score_id] = True
 
 ### Why This Matters
-1. Double-application attack is now prevented.
+1. Double-application attack is prevented.
 2. Each score can only affect reputation once.
-3. The system is idempotent with respect to score_id.
 
 ### Trade-off
 - One extra storage map per contract.
@@ -113,27 +111,26 @@ self.applied_scores[score_id] = True
 
 ---
 
-## 7. Why Independent Validator Recomputation (v5)?
+## 7. Why Independent Validator Recomputation?
 
 ### Problem
-In v2-v4, the validator only checked whether the leader's status was an allowed label (VERIFIED, PARTIAL, REJECTED). It did not independently recompute verified_count, total, or verified_urls. A malicious or faulty leader could return any value for these fields, and as long as status was one of the three allowed labels, validators would accept it. This broke the chain of trust because ConfidenceScorer and ReputationGuardian depend on these fields.
+In earlier versions, the validator only checked whether the leader's status was an allowed label. It did not independently recompute verified_count, total, or verified_urls. A malicious or faulty leader could return any value for these fields, and validators would accept it.
 
 ### Solution
-The validator now performs five independent checks:
-1. Shape validation: types, bounds, and total consistency.
-2. Independent recomputation: fetch every source and recompute verified_count and status.
-3. Invariant check: status must equal compute_status(count, total).
-4. Scalar comparison: validator_count == leader_count and validator_status == leader_status.
-5. Set comparison: the set of verified URLs must match exactly.
+The validator performs five independent checks:
+1. Shape validation.
+2. Independent recomputation of verified_count and status.
+3. Invariant check: status equals compute_status(count, total).
+4. Scalar comparison of count and status.
+5. Set comparison of verified URLs.
 
-All five checks must pass for the result to be accepted.
+All five must pass.
 
 ### Why This Matters
 1. Leader cannot lie about status: invariant is checked.
 2. Leader cannot lie about verified_count: scalars are compared.
 3. Leader cannot lie about which URLs were verified: sets are compared.
 4. Leader cannot lie about total: total consistency is enforced.
-5. Every consequential field is bound to an independent recomputation.
 
 ### Trade-off
 - Each validator fetches every source independently, which increases cost and time.
@@ -141,10 +138,10 @@ All five checks must pass for the result to be accepted.
 
 ---
 
-## 8. Why Prevent Double-Scoring in ConfidenceScorer (v5)?
+## 8. Why Prevent Double-Scoring?
 
 ### Problem
-In v4, if calculate_score(verification_id) was called twice for the same verification, two score records would be created, and potentially applied twice downstream.
+If calculate_score(verification_id) was called twice for the same verification, two score records would be created, and potentially applied twice downstream.
 
 ### Solution
 Added a scored_verifications map that tracks which verification_ids have already been scored:
@@ -154,7 +151,6 @@ self.scored_verifications[verification_id] = True
 ### Why This Matters
 1. Each verification can only produce one score.
 2. Downstream scoring is deterministic per verification.
-3. The overall system is idempotent with respect to verification_id.
 
 ### Trade-off
 - One extra storage map.
@@ -162,69 +158,87 @@ self.scored_verifications[verification_id] = True
 
 ---
 
-## 9. Why Include Verified URLs in Storage?
+## 9. Why Bind agent to gl.message.sender_address?
 
 ### Problem
-Downstream contracts and the validator need to know not just how many sources were verified, but which specific sources were verified.
+submit_evidence(agent, claim, sources) still accepted agent as a free string from caller. This meant anyone could submit evidence on behalf of another agent, breaking the trust model from the very first step.
 
 ### Solution
-The VerificationRecord stores a verified_urls field as a comma-separated string, and the validator compares it as a set.
+Removed the agent parameter entirely. The agent is now derived from str(gl.message.sender_address).
+
+### Why This Matters
+1. Every evidence submission is provably tied to the real transaction sender.
+2. No caller can impersonate another agent at the submission layer.
+3. The chain of trust starts from an authenticated identity.
 
 ### Trade-off
-- Storing URLs increases storage usage slightly.
-- But it provides full transparency and traceability for every verification.
+- Organizations that want to submit on behalf of another agent would need a delegation mechanism (out of scope for this version).
+- But for individual agents, the security guarantee is complete.
 
 ---
 
-## 10. Why Two Separate Downstream Contracts?
+## 10. Why Revert on PENDING and Avoid Consuming PENDING Records?
 
 ### Problem
-Why not combine ConfidenceScorer and ReputationGuardian into a single contract?
+In the previous version, calculate_score could be called on a still-PENDING verification, and it would mark the verification as scored even though no final status existed. This permanently consumed a PENDING record that was not ready to be scored.
 
 ### Solution
-Separating them provides:
-- Single responsibility: each contract does one thing well.
-- Easier testing: each contract can be tested independently.
-- Better upgradability: one contract can be redeployed without affecting the other.
+calculate_score now:
+1. Reads the verification.
+2. Asserts status != "PENDING" (reverts if still pending).
+3. Asserts the verification was not already scored.
+4. Only marks scored_verifications on the successful path, as the last line of the function.
+
+### Why This Matters
+1. A PENDING verification is never consumed.
+2. Callers cannot accidentally lock a verification by calling calculate_score too early.
+3. The scoring step is idempotent with respect to final status.
 
 ### Trade-off
-- More contracts mean more deployment steps.
-- But the modular architecture is easier to maintain and audit.
+- Callers must check status first (or catch the revert).
+- But this is the correct contract behavior.
 
 ---
 
-## 11. Why Use gl.vm.run_nondet_unsafe Instead of Simple LLM Calls?
+## 11. Why Remove initialize_reputation?
 
 ### Problem
-A single LLM call could be manipulated or produce inconsistent results.
+initialize_reputation(agent, initial_score) could be called by anyone for any agent that had not been initialized yet. A malicious caller could race the real owner and claim an agent first, potentially with a hostile initial score.
 
 ### Solution
-The MultiSourceVerifier uses gl.vm.run_nondet_unsafe with a leader/validator pattern:
-- The leader fetches content and asks the LLM to check corroboration.
-- Independent validators recompute every consequential field.
-- Consensus is required for the result to be accepted.
+Removed initialize_reputation entirely. A lazy default of 50 is provided by:
+current_reputation = self.reputation.get(agent, u256(50))
+
+### Why This Matters
+1. No one can claim an agent before its owner interacts.
+2. The default is uniform across all agents (50).
+3. The attack surface is removed rather than mitigated.
 
 ### Trade-off
-- More complex and slower than a simple LLM call.
-- But it provides real, independent verification, which is the core value of GenLayer.
+- Callers that wanted to set a custom initial score cannot do so directly.
+- But the security benefit outweighs this flexibility.
 
 ---
 
-## 12. Why Expose get_..._data View Methods?
+## 12. Why Enforce Genuinely Distinct Sources?
 
 ### Problem
-Downstream contracts need to read structured data from upstream contracts without parsing complex JSON.
+The previous version accepted two URLs from the same domain (or two identical URLs) as "two independent sources". This trivially defeated the multi-source threshold.
 
 ### Solution
-Each upstream contract exposes a dedicated view method:
-- get_verification_data(evidence_id) in MultiSourceVerifier
-- get_score_data(evidence_id) in ConfidenceScorer
+submit_evidence now:
+1. Normalizes each URL.
+2. Enforces uniqueness by normalized URL.
+3. Enforces uniqueness by domain.
 
-These methods return a clean, minimal JSON payload specifically designed for downstream consumption.
+### Why This Matters
+1. Two sources from the same domain are not independent.
+2. Two identical URLs are not two sources.
+3. The multi-source threshold now reflects genuine independence.
 
 ### Trade-off
-- Adds a few extra lines of code.
-- But it makes the chaining clean, consistent, and easy to extend.
+- Some legitimate multi-source scenarios (e.g., two pages on the same site) are blocked.
+- But this is a small price for the integrity of the threshold.
 
 ---
 
@@ -233,17 +247,17 @@ These methods return a clean, minimal JSON payload specifically designed for dow
 | Decision | Reason |
 | :--- | :--- |
 | Multi-source verification | Reduces single point of failure |
-| URL normalization | Prevents inconsistencies and attacks |
+| URL normalization | Prevents inconsistencies and trivial bypasses |
 | Deterministic scoring | Fast, cheap, predictable |
-| Contract chaining (v2) | Prevents fabrication of scores |
-| Agent binding (v3) | Prevents agent spoofing |
-| Double-application prevention (v4) | Each score applies only once |
-| Independent validator recomputation (v5) | Prevents leader manipulation |
-| Double-scoring prevention (v5) | Each verification produces one score |
-| Store verified URLs | Full transparency and traceability |
-| Separate downstream contracts | Modular, testable, upgradable |
-| Use gl.vm.run_nondet_unsafe | Real independent verification |
-| Expose get_..._data methods | Clean, consistent chaining |
+| Contract chaining | Prevents fabrication of scores |
+| Agent binding to sender | Prevents submission-layer impersonation |
+| Prevent double-application | Each score applies only once |
+| Independent validator recomputation | Prevents leader manipulation |
+| Prevent double-scoring | Each verification produces one score |
+| Identity binding via sender_address | Trust starts at the tx sender |
+| Revert on PENDING | PENDING records are never consumed |
+| Remove initialize_reputation | Removes early-claim attack surface |
+| Enforce distinct sources | Multi-source threshold reflects real independence |
 
 ---
 
