@@ -21,7 +21,7 @@ class ConfidenceRecord:
 
 class ConfidenceScorer(gl.Contract):
     scores: TreeMap[u256, ConfidenceRecord]
-    scored_verifications: TreeMap[u256, bool]  # NEW: track scored verification IDs
+    scored_verifications: TreeMap[u256, bool]
     next_id: u256
     verifier_contract: str
 
@@ -31,9 +31,7 @@ class ConfidenceScorer(gl.Contract):
 
     @gl.public.write
     def calculate_score(self, verification_id: u256) -> u256:
-        # NEW: prevent scoring the same verification twice
-        assert verification_id not in self.scored_verifications, "Verification already scored"
-
+        # Read verification data from upstream contract
         verifier_data_raw = gl.get_contract_at(
             Address(self.verifier_contract)
         ).view().get_verification_data(verification_id)
@@ -45,9 +43,16 @@ class ConfidenceScorer(gl.Contract):
         except:
             raise gl.vm.UserError("Invalid data from verifier contract")
 
+        status = data.get("status", "PENDING")
+
+        # Scoring only allowed after verification reaches a final status
+        assert status != "PENDING", "Evidence has not been verified yet"
+
+        # Prevent double-scoring
+        assert verification_id not in self.scored_verifications, "Verification already scored"
+
         verified_count = data.get("verified_count", 0)
         total_sources = data.get("total_sources", 1)
-        status = data.get("status", "PENDING")
         agent = data.get("agent", "")
 
         assert agent != "", "Agent not found in verification record"
@@ -78,7 +83,7 @@ class ConfidenceScorer(gl.Contract):
             verifier_address=self.verifier_contract,
         )
 
-        # NEW: mark verification as scored
+        # Mark as scored only on the successful path
         self.scored_verifications[verification_id] = True
 
         return eid
